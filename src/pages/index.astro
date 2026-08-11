@@ -1,0 +1,17 @@
+---
+import { AppRoot } from "../components/AppRoot";
+import "../styles/global.css";
+---
+
+<html lang="es">
+	<head>
+		<meta charset="utf-8" />
+		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+		<meta name="viewport" content="width=device-width" />
+		<meta name="generator" content={Astro.generator} />
+		<title>Taskly - Tus tareas</title>
+	</head>
+	<body class="min-h-screen bg-slate-100 text-slate-800 antialiased">
+		<AppRoot client:load />
+	</body>
+</html>

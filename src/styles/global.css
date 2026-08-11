@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+@theme {
+  --animate-pulse-ring: pulse-ring 1.8s ease-in-out infinite;
+  --animate-toast-in: toast-in 0.2s ease;
+  --animate-sheet-in: sheet-in 0.18s ease;
+
+  @keyframes pulse-ring {
+    0%,
+    100% {
+      box-shadow: 0 0 0 0 rgb(99 102 241 / 0.45);
+    }
+    50% {
+      box-shadow: 0 0 0 5px rgb(99 102 241 / 0);
+    }
+  }
+
+  @keyframes toast-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes sheet-in {
+    from {
+      opacity: 0.6;
+      transform: translateY(16px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
