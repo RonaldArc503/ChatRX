@@ -62,7 +62,13 @@ const ITEMS: { key: View; label: string; icon: () => JSX.Element }[] = [
 export function BottomNav({ view, onNavigate }: BottomNavProps) {
   return (
     <nav
-      class="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur lg:sticky lg:inset-x-auto lg:bottom-auto lg:top-0 lg:border-b lg:border-t-0"
+      class={
+        "fixed inset-x-0 bottom-0 z-40 bg-white/95 backdrop-blur " +
+        (view === "chat"
+          ? "shadow-[0_-3px_12px_rgb(15_23_42/0.06)]"
+          : "border-t border-slate-200") +
+        " lg:sticky lg:inset-x-auto lg:bottom-auto lg:top-0 lg:border-b lg:border-t-0 lg:shadow-none"
+      }
       aria-label="Navegación principal"
     >
       <div class="mx-auto flex max-w-5xl items-stretch px-1 sm:px-4">

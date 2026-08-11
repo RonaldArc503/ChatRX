@@ -94,7 +94,7 @@ export function ChatView({ user }: ChatViewProps) {
   };
 
   return (
-    <div class="flex h-[calc(100dvh-8.5rem)] min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:h-[calc(100vh-7rem)] lg:flex-row">
+    <div class="fixed inset-x-0 top-0 z-30 flex h-[calc(100dvh-var(--nav-h))] min-h-0 flex-col overflow-hidden bg-white lg:static lg:z-auto lg:h-[calc(100vh-7rem)] lg:flex-row lg:rounded-2xl lg:border lg:border-slate-200 lg:shadow-sm">
       <aside
         class={
           "min-h-0 flex-col bg-white lg:w-80 lg:max-w-xs lg:shrink-0 lg:border-r lg:border-slate-200 " +
@@ -135,10 +135,10 @@ export function ChatView({ user }: ChatViewProps) {
 
       <section
         class={
-          "min-h-0 flex-col overflow-hidden bg-slate-50 " +
-          (panelOpen
-            ? "fixed inset-0 z-50 flex lg:static lg:z-auto"
-            : "hidden lg:flex lg:flex-1 lg:items-center lg:justify-center")
+"min-h-0 flex-col overflow-hidden bg-slate-50 " +
+            (panelOpen
+              ? "absolute inset-0 z-40 flex lg:static lg:z-auto"
+              : "hidden lg:flex lg:flex-1 lg:items-center lg:justify-center")
         }
       >
         {selectedConv ? (

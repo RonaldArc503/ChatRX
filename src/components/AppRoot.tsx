@@ -94,7 +94,13 @@ export function AppRoot() {
 
       <BottomNav view={view} onNavigate={setView} />
 
-      <main class="mx-auto w-full max-w-5xl px-4 pb-28 pt-6 sm:px-6 lg:pb-12 lg:pt-10">
+      <main
+        class={
+          view === "chat"
+            ? "h-[100dvh] w-full lg:h-auto lg:mx-auto lg:max-w-5xl lg:px-6 lg:pb-12 lg:pt-10"
+            : "mx-auto w-full max-w-5xl px-4 pb-28 pt-6 sm:px-6 lg:pb-12 lg:pt-10"
+        }
+      >
         {view === "home" ? <HomeView user={user} onNavigate={setView} /> : null}
         {view === "tasks" ? (
           <div class="flex flex-col gap-5">
