@@ -82,15 +82,22 @@ export function MessageBubble({
     byEmoji.set(entry[1], (byEmoji.get(entry[1]) ?? 0) + 1);
   }
   const reactionRows = [...byEmoji.entries()];
+  const hasMedia =
+    msg.attachments?.some((a) => a.kind === "image" || a.kind === "video") ??
+    false;
+  const hasCaption = msg.text.trim().length > 0;
 
   return (
     <div class={"flex flex-col " + (mine ? "items-end" : "items-start")}>
       <div
         class={
-          "max-w-[80%] select-none rounded-2xl px-3.5 py-2 shadow-sm " +
+          "max-w-[80%] select-none rounded-2xl shadow-sm " +
+          (hasMedia ? "overflow-hidden p-0 " : "px-3.5 py-2 ") +
           (mine
             ? "rounded-br-md bg-indigo-600 text-white"
-            : "rounded-bl-md border border-slate-200 bg-white text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100")
+            : hasMedia
+              ? "rounded-bl-md bg-white text-slate-800 dark:bg-slate-800 dark:text-slate-100"
+              : "rounded-bl-md border border-slate-200 bg-white text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100")
         }
         style={{ touchAction: "pan-y" }}
         onPointerDown={handlePointerDown}
@@ -108,7 +115,8 @@ export function MessageBubble({
         {msg.replyTo ? (
           <div
             class={
-              "mb-1.5 rounded-lg px-2.5 py-1.5 text-xs " +
+              (hasMedia ? "mb-1 m-2 mt-2 " : "mb-1.5 ") +
+              "rounded-lg px-2.5 py-1.5 text-xs " +
               (mine
                 ? "bg-white/15 text-indigo-100"
                 : "bg-slate-100 text-slate-500 dark:bg-slate-700/70 dark:text-slate-300")
@@ -122,7 +130,13 @@ export function MessageBubble({
         ) : null}
 
         {msg.attachments && msg.attachments.length > 0 ? (
-          <div class="mb-1.5 flex flex-col gap-1.5">
+          <div
+            class={
+              (hasMedia && !hasCaption ? "relative " : "") +
+              "flex flex-col gap-1.5" +
+              (hasMedia ? "" : " mb-1.5")
+            }
+          >
             {msg.attachments.map((a, i) => (
               <AttachmentItem
                 key={a.publicId + i}
@@ -131,41 +145,60 @@ export function MessageBubble({
                 onOpen={openAttachment}
               />
             ))}
+
+            {hasMedia && !hasCaption ? (
+              <div class="pointer-events-none absolute bottom-1.5 right-2">
+                <span class="rounded-full bg-slate-900/60 px-2 py-0.5 text-[11px] leading-none text-white backdrop-blur-sm">
+                  {msg.edited ? <span class="mr-1 italic opacity-80">editado</span> : null}
+                  {formatTime(msg.createdAt)}
+                </span>
+              </div>
+            ) : null}
           </div>
         ) : null}
 
-        <p class="whitespace-pre-wrap break-words text-[15px] leading-snug">
-          {splitLinks(msg.text).map((seg, i) =>
-            seg.url ? (
-              <a
-                key={i}
-                href={seg.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                class={
-                  "break-all underline underline-offset-2 " +
-                  (mine ? "decoration-indigo-300" : "text-indigo-600 dark:text-indigo-400")
-                }
-                onClick={handleLinkClick}
-              >
-                {seg.text}
-              </a>
-            ) : (
-              <span key={i}>{seg.text}</span>
-            ),
-          )}
-        </p>
-        <p
-          class={
-            "mt-0.5 text-right text-[11px] leading-none " +
-            (mine ? "text-indigo-200" : "text-slate-400 dark:text-slate-500")
-          }
-        >
-          {msg.edited ? (
-            <span class="mr-1 italic opacity-80">editado</span>
-          ) : null}
-          {formatTime(msg.createdAt)}
-        </p>
+        {hasCaption ? (
+          <p
+            class={
+              (hasMedia ? "px-3 pb-1 pt-1.5 " : "") +
+              "whitespace-pre-wrap break-words text-[15px] leading-snug"
+            }
+          >
+            {splitLinks(msg.text).map((seg, i) =>
+              seg.url ? (
+                <a
+                  key={i}
+                  href={seg.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class={
+                    "break-all underline underline-offset-2 " +
+                    (mine ? "decoration-indigo-300" : "text-indigo-600 dark:text-indigo-400")
+                  }
+                  onClick={handleLinkClick}
+                >
+                  {seg.text}
+                </a>
+              ) : (
+                <span key={i}>{seg.text}</span>
+              ),
+            )}
+          </p>
+        ) : null}
+        {hasMedia && !hasCaption ? null : (
+          <p
+            class={
+              (hasMedia ? "px-3 pb-2 " : "mt-0.5 ") +
+              "text-right text-[11px] leading-none " +
+              (mine ? "text-indigo-200" : "text-slate-400 dark:text-slate-500")
+            }
+          >
+            {msg.edited ? (
+              <span class="mr-1 italic opacity-80">editado</span>
+            ) : null}
+            {formatTime(msg.createdAt)}
+          </p>
+        )}
       </div>
 
       {reactionRows.length > 0 ? (
@@ -204,14 +237,14 @@ function AttachmentItem({ a, mine, onOpen }: AttachmentItemProps) {
     return (
       <button
         type="button"
-        class="block max-w-full overflow-hidden rounded-xl"
+        class="block max-w-full"
         onClick={() => onOpen(a)}
       >
         <img
           src={attachmentMediaUrl(a.url, "w_700,f_auto,q_auto")}
           alt={a.name}
           loading="lazy"
-          class="max-h-80 w-auto max-w-full object-cover"
+          class="block max-h-80 w-auto max-w-full object-cover"
         />
       </button>
     );
@@ -224,7 +257,7 @@ function AttachmentItem({ a, mine, onOpen }: AttachmentItemProps) {
         playsinline
         preload="metadata"
         src={a.url}
-        class="max-h-72 max-w-full rounded-xl"
+        class="block max-h-72 max-w-full"
       >
         <track kind="captions" />
       </video>
