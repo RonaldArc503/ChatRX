@@ -5,11 +5,13 @@ interface MessageActionsSheetProps {
   msg: ChatMessage | null;
   mine: boolean;
   uid?: string;
+  isPinned: boolean;
   onClose: () => void;
   onEdit: (msg: ChatMessage) => void;
   onDelete: (msg: ChatMessage) => void;
   onReply: (msg: ChatMessage) => void;
   onReact: (msg: ChatMessage, emoji: string) => void;
+  onPin: (msg: ChatMessage) => void;
 }
 
 const REACT_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
@@ -56,6 +58,13 @@ const DOWNLOAD_ICON = (
   </svg>
 );
 
+const PIN_ICON = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-5 w-5">
+    <path d="M12 17v5" />
+    <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z" />
+  </svg>
+);
+
 async function downloadAttachment(url: string, name: string): Promise<void> {
   try {
     const res = await fetch(url);
@@ -77,11 +86,13 @@ export function MessageActionsSheet({
   msg,
   mine,
   uid,
+  isPinned,
   onClose,
   onEdit,
   onDelete,
   onReply,
   onReact,
+  onPin,
 }: MessageActionsSheetProps) {
   const [copied, setCopied] = useState(false);
 
@@ -152,6 +163,24 @@ export function MessageActionsSheet({
               {REPLY_ICON}
             </span>
             Responder
+          </button>
+
+          <button
+            type="button"
+            class="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
+            onClick={() => onPin(msg)}
+          >
+            <span
+              class={
+                "grid h-9 w-9 flex-none place-items-center rounded-full " +
+                (isPinned
+                  ? "bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400"
+                  : "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300")
+              }
+            >
+              {PIN_ICON}
+            </span>
+            {isPinned ? "Desfijar mensaje" : "Fijar mensaje"}
           </button>
 
           <button

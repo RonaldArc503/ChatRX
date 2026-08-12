@@ -30,12 +30,17 @@ export interface ChatConversation {
   lastMessage: string;
   lastMessageAt: number;
   createdAt: number;
+  pinnedMessages?: PinnedMessage[];
 }
 
 export interface ReplyInfo {
   id: string;
   text: string;
   senderId: string;
+}
+
+export interface PinnedMessage extends ReplyInfo {
+  pinnedAt: number;
 }
 
 export interface ChatAttachment {
@@ -218,6 +223,44 @@ export function markConversationRead(convId: string, uid: string): void {
   updateDoc(doc(db!, "conversations", convId), { [`unread.${uid}`]: 0 }).catch(
     () => {},
   );
+}
+
+export async function pinMessage(
+  convId: string,
+  msg: Pick<ChatMessage, "id" | "text" | "senderId">,
+): Promise<void> {
+  const convRef = doc(db!, "conversations", convId);
+  const pinned: PinnedMessage = {
+    id: msg.id,
+    text: msg.text,
+    senderId: msg.senderId,
+    pinnedAt: Date.now(),
+  };
+
+  await runTransaction(db!, async (tx) => {
+    const snap = await tx.get(convRef);
+    const existing = (snap.exists()
+      ? (snap.data() as { pinnedMessages?: PinnedMessage[] }).pinnedMessages
+      : undefined) ?? [];
+    const next = [
+      pinned,
+      ...existing.filter((p) => p.id !== msg.id),
+    ];
+    tx.update(convRef, { pinnedMessages: next });
+  });
+}
+
+export async function unpinMessage(convId: string, msgId: string): Promise<void> {
+  const convRef = doc(db!, "conversations", convId);
+  await runTransaction(db!, async (tx) => {
+    const snap = await tx.get(convRef);
+    const existing = (snap.exists()
+      ? (snap.data() as { pinnedMessages?: PinnedMessage[] }).pinnedMessages
+      : undefined) ?? [];
+    tx.update(convRef, {
+      pinnedMessages: existing.filter((p) => p.id !== msgId),
+    });
+  });
 }
 
 export async function editMessage(

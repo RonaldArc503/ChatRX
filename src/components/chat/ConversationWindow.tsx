@@ -3,9 +3,11 @@ import {
   deleteMessage,
   editMessage,
   markConversationRead,
+  pinMessage,
   sendMessage,
   subscribeMessages,
   toggleReaction,
+  unpinMessage,
   type ChatAttachment,
   type ChatConversation,
   type ChatMessage,
@@ -21,6 +23,7 @@ import {
   setTyping,
   subscribeTyping,
 } from "../../lib/typing";
+import { optimizeVideo } from "../../lib/videoOptimizer";
 import type { Presence } from "../../lib/presence";
 import type { UserProfile } from "../../lib/profile";
 import { AttachmentLightbox } from "./AttachmentLightbox";
@@ -34,7 +37,7 @@ interface AttachmentDraft {
   id: string;
   file: File;
   kind: "image" | "video" | "pdf" | "doc" | "file";
-  status: "ready" | "uploading" | "done" | "error";
+  status: "ready" | "optimizing" | "uploading" | "done" | "error";
   progress: number;
   error?: string;
   attach?: ChatAttachment;
@@ -69,6 +72,9 @@ export function ConversationWindow({
     a: ChatAttachment;
     caption: string;
   } | null>(null);
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const highlightTimer = useRef<number | null>(null);
+  const [pinnedIndex, setPinnedIndex] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -125,7 +131,13 @@ export function ConversationWindow({
     setText("");
     setSendError(null);
     setLightbox(null);
+    setHighlightedId(null);
+    if (highlightTimer.current !== null) {
+      window.clearTimeout(highlightTimer.current);
+      highlightTimer.current = null;
+    }
     setUploading(false);
+    setPinnedIndex(0);
     clearDraftUrls();
     setPendingFiles([]);
   }, [conv.id]);
@@ -136,6 +148,15 @@ export function ConversationWindow({
       autoGrow(inputRef.current);
     }
   }, [editing]);
+
+  const pinnedList = conv.pinnedMessages ?? [];
+  useEffect(() => {
+    if (pinnedList.length === 0) {
+      setPinnedIndex(0);
+    } else if (pinnedIndex >= pinnedList.length) {
+      setPinnedIndex(pinnedList.length - 1);
+    }
+  }, [pinnedList.length, pinnedIndex]);
 
   useEffect(() => {
     return () => clearTyping(conv.id, me.uid);
@@ -169,6 +190,35 @@ export function ConversationWindow({
     setShowJump(false);
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
+  }
+
+  function scrollToMessage(msgId: string) {
+    const el = scrollRef.current;
+    if (!el) return;
+    const target = el.querySelector<HTMLElement>(
+      `[data-message-id="${CSS.escape(msgId)}"]`,
+    );
+    stickRef.current = false;
+    setShowJump(false);
+    if (!target) return;
+
+    const containerRect = el.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const delta =
+      targetRect.top -
+      containerRect.top -
+      containerRect.height / 2 +
+      target.offsetHeight / 2;
+    el.scrollTo({
+      top: el.scrollTop + delta,
+      behavior: "smooth",
+    });
+    setHighlightedId(msgId);
+    if (highlightTimer.current !== null) window.clearTimeout(highlightTimer.current);
+    highlightTimer.current = window.setTimeout(() => {
+      setHighlightedId(null);
+      highlightTimer.current = null;
+    }, 2500);
   }
 
   function clearDraftUrls() {
@@ -232,8 +282,39 @@ export function ConversationWindow({
         x.id === d.id ? { ...x, status: "uploading" as const, progress: 0 } : x,
       ),
     );
+
+    let fileToUpload = d.file;
+    if (d.kind === "video" && fileToUpload.size > 5 * 1024 * 1024) {
+      setPendingFiles((prev) =>
+        prev.map((x) =>
+          x.id === d.id ? { ...x, status: "optimizing" as const } : x,
+        ),
+      );
+      const optimized = await optimizeVideo(fileToUpload);
+      if (optimized !== fileToUpload) {
+        if (d.previewUrl) URL.revokeObjectURL(d.previewUrl);
+        fileToUpload = optimized;
+        const previewUrl = URL.createObjectURL(fileToUpload);
+        setPendingFiles((prev) =>
+          prev.map((x) =>
+            x.id === d.id
+              ? { ...x, file: fileToUpload, previewUrl, status: "uploading" as const, progress: 0 }
+              : x,
+          ),
+        );
+      } else {
+        setPendingFiles((prev) =>
+          prev.map((x) =>
+            x.id === d.id
+              ? { ...x, status: "uploading" as const, progress: 0 }
+              : x,
+          ),
+        );
+      }
+    }
+
     try {
-      const res = await uploadToCloudinary(d.file, me.uid, (p) => {
+      const res = await uploadToCloudinary(fileToUpload, me.uid, (p) => {
         setPendingFiles((prev) =>
           prev.map((x) => (x.id === d.id ? { ...x, progress: p } : x)),
         );
@@ -244,8 +325,8 @@ export function ConversationWindow({
         url: res.url,
         publicId: res.publicId,
         name: d.file.name,
-        size: res.bytes || d.file.size,
-        mimeType: d.file.type,
+        size: res.bytes || fileToUpload.size,
+        mimeType: fileToUpload.type,
       };
       if (res.width !== undefined) attach.width = res.width;
       if (res.height !== undefined) attach.height = res.height;
@@ -417,10 +498,29 @@ export function ConversationWindow({
   async function handleDelete(m: ChatMessage) {
     setMenuMsg(null);
     try {
+      if (conv.pinnedMessages?.some((p) => p.id === m.id)) {
+        await unpinMessage(conv.id, m.id).catch(() => {});
+      }
       await deleteMessage(conv.id, m.id);
     } catch (err) {
       setSendError(
         err instanceof Error ? err.message : "No se pudo eliminar el mensaje.",
+      );
+    }
+  }
+
+  async function handlePin(m: ChatMessage) {
+    setMenuMsg(null);
+    try {
+      await pinMessage(conv.id, {
+        id: m.id,
+        text: m.text,
+        senderId: m.senderId,
+      });
+      setPinnedIndex(0);
+    } catch (err) {
+      setSendError(
+        err instanceof Error ? err.message : "No se pudo fijar el mensaje.",
       );
     }
   }
@@ -451,6 +551,9 @@ export function ConversationWindow({
         onOpenMenu={setMenuMsg}
         onReact={handleReact}
         onOpenAttachment={(m, a) => setLightbox({ a, caption: m.text })}
+        onJumpToReply={scrollToMessage}
+        isPinned={conv.pinnedMessages?.some((p) => p.id === msg.id) ?? false}
+        highlighted={highlightedId === msg.id}
       />,
     );
   });
@@ -497,6 +600,76 @@ export function ConversationWindow({
           )}
         </div>
       </header>
+
+      {pinnedList.length > 0 ? (
+        <div class="flex items-center gap-1.5 border-b border-slate-200 bg-indigo-50/70 px-3 py-2 dark:border-slate-800 dark:bg-indigo-500/10">
+          <span class="grid h-7 w-7 flex-none place-items-center rounded-lg bg-indigo-100 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-400">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-4 w-4">
+              <path d="M12 17v5" />
+              <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z" />
+            </svg>
+          </span>
+          {pinnedList.length > 1 ? (
+            <>
+              <button
+                type="button"
+                aria-label="Fijado anterior"
+                onClick={() =>
+                  setPinnedIndex((i) => (i - 1 + pinnedList.length) % pinnedList.length)
+                }
+                class="grid h-6 w-6 flex-none place-items-center rounded-lg text-indigo-400 transition-colors hover:bg-indigo-100 hover:text-indigo-600 dark:hover:bg-indigo-500/20"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" class="h-3.5 w-3.5">
+                  <path d="m15 18-6-6 6-6" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                aria-label="Fijado siguiente"
+                onClick={() => setPinnedIndex((i) => (i + 1) % pinnedList.length)}
+                class="grid h-6 w-6 flex-none place-items-center rounded-lg text-indigo-400 transition-colors hover:bg-indigo-100 hover:text-indigo-600 dark:hover:bg-indigo-500/20"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" class="h-3.5 w-3.5">
+                  <path d="m9 18 6-6-6-6" />
+                </svg>
+              </button>
+            </>
+          ) : null}
+          <button
+            type="button"
+            class="min-w-0 flex-1 text-left"
+            onClick={() => scrollToMessage(pinnedList[pinnedIndex].id)}
+          >
+            <span class="block text-[11px] font-bold text-indigo-700 dark:text-indigo-300">
+              Mensaje fijado{" · "}
+              {pinnedList[pinnedIndex].senderId === me.uid
+                ? "Tú"
+                : peer.isSelf
+                  ? "Tú"
+                  : peer.name}
+            </span>
+            <span class="block truncate text-xs text-indigo-900/80 dark:text-indigo-200/80">
+              {pinnedList[pinnedIndex].text || "Adjunto"}
+            </span>
+          </button>
+          <span class="flex-none text-[11px] font-semibold tabular-nums text-indigo-400 dark:text-indigo-300">
+            {pinnedIndex + 1}/{pinnedList.length}
+          </span>
+          <button
+            type="button"
+            aria-label="Desfijar mensaje"
+            onClick={() => {
+              unpinMessage(conv.id, pinnedList[pinnedIndex].id).catch(() => {});
+            }}
+            class="grid h-7 w-7 flex-none place-items-center rounded-lg text-indigo-400 transition-colors hover:bg-indigo-100 hover:text-indigo-600 dark:hover:bg-indigo-500/20"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" class="h-4 w-4">
+              <path d="M18 6 6 18" />
+              <path d="m6 6 12 12" />
+            </svg>
+          </button>
+        </div>
+      ) : null}
 
       <div class="relative min-h-0 flex-1">
         <div
@@ -616,6 +789,17 @@ export function ConversationWindow({
                     {d.kind === "pdf" ? "PDF" : d.file.name.split(".").pop()}
                   </span>
                 )}
+
+                {d.status === "optimizing" ? (
+                  <div class="absolute inset-0 grid place-items-center bg-black/45">
+                    <span class="flex items-center gap-1.5 text-[11px] font-bold text-white">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" class="h-3.5 w-3.5 animate-spin">
+                        <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                      </svg>
+                      Optimizando…
+                    </span>
+                  </div>
+                ) : null}
 
                 {d.status === "uploading" ? (
                   <div class="absolute inset-0 grid place-items-center bg-black/45">
@@ -740,11 +924,13 @@ export function ConversationWindow({
         msg={menuMsg}
         mine={menuMsg !== null && menuMsg.senderId === me.uid}
         uid={me.uid}
+        isPinned={(menuMsg !== null && conv.pinnedMessages?.some((p) => p.id === menuMsg.id)) || false}
         onClose={() => setMenuMsg(null)}
         onEdit={handleEdit}
         onDelete={handleDelete}
         onReply={handleReply}
         onReact={handleReact}
+        onPin={handlePin}
       />
 
       {lightbox ? (

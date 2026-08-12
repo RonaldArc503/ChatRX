@@ -11,6 +11,9 @@ interface MessageBubbleProps {
   onOpenMenu: (msg: ChatMessage) => void;
   onReact: (msg: ChatMessage, emoji: string) => void;
   onOpenAttachment: (msg: ChatMessage, attachment: ChatAttachment) => void;
+  onJumpToReply?: (msgId: string) => void;
+  isPinned?: boolean;
+  highlighted?: boolean;
 }
 
 const LONG_PRESS_MS = 500;
@@ -23,6 +26,9 @@ export function MessageBubble({
   onOpenMenu,
   onReact,
   onOpenAttachment,
+  onJumpToReply,
+  isPinned,
+  highlighted,
 }: MessageBubbleProps) {
   const timer = useRef<number | null>(null);
   const start = useRef<{ x: number; y: number } | null>(null);
@@ -90,9 +96,11 @@ export function MessageBubble({
   return (
     <div class={"flex flex-col " + (mine ? "items-end" : "items-start")}>
       <div
+        data-message-id={msg.id}
         class={
           "max-w-[80%] select-none rounded-2xl shadow-sm " +
           (hasMedia ? "overflow-hidden p-0 " : "px-3.5 py-2 ") +
+          (highlighted ? "msg-highlight " : "") +
           (mine
             ? "rounded-br-md bg-indigo-600 text-white"
             : hasMedia
@@ -113,20 +121,30 @@ export function MessageBubble({
         }}
       >
         {msg.replyTo ? (
-          <div
+          <button
+            type="button"
             class={
+              "block w-full text-left " +
               (hasMedia ? "mb-1 m-2 mt-2 " : "mb-1.5 ") +
               "rounded-lg px-2.5 py-1.5 text-xs " +
               (mine
                 ? "bg-white/15 text-indigo-100"
-                : "bg-slate-100 text-slate-500 dark:bg-slate-700/70 dark:text-slate-300")
+                : "bg-slate-100 text-slate-500 dark:bg-slate-700/70 dark:text-slate-300") +
+              (onJumpToReply ? " cursor-pointer transition-colors " + (mine ? "hover:bg-white/25" : "hover:bg-slate-200 dark:hover:bg-slate-700") : " cursor-default")
             }
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onJumpToReply) onJumpToReply(msg.replyTo!.id);
+            }}
           >
-            <p class="font-semibold">
+            <span class="flex items-center gap-1 font-semibold">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-3 w-3 flex-none">
+                <path d="m3 11 9-9v5c6 1 9 5 9 11-2-4-5-5-9-5v5Z" />
+              </svg>
               {msg.replyTo.senderId === uid ? "Tú" : "Contacto"}
-            </p>
-            <p class="truncate">{msg.replyTo.text}</p>
-          </div>
+            </span>
+            <span class="mt-0.5 block truncate">{msg.replyTo.text || "Adjunto"}</span>
+          </button>
         ) : null}
 
         {msg.attachments && msg.attachments.length > 0 ? (
@@ -147,7 +165,12 @@ export function MessageBubble({
             ))}
 
             {hasMedia && !hasCaption ? (
-              <div class="pointer-events-none absolute bottom-1.5 right-2">
+              <div class="pointer-events-none absolute bottom-1.5 right-2 flex items-center gap-1">
+                {isPinned ? (
+                  <span class="grid h-5 w-5 place-items-center rounded-full bg-slate-900/60 text-white backdrop-blur-sm">
+                    <PinIcon />
+                  </span>
+                ) : null}
                 <span class="rounded-full bg-slate-900/60 px-2 py-0.5 text-[11px] leading-none text-white backdrop-blur-sm">
                   {msg.edited ? <span class="mr-1 italic opacity-80">editado</span> : null}
                   {formatTime(msg.createdAt)}
@@ -193,6 +216,7 @@ export function MessageBubble({
               (mine ? "text-indigo-200" : "text-slate-400 dark:text-slate-500")
             }
           >
+            {isPinned ? <span class="mr-1 align-middle"><PinIcon /></span> : null}
             {msg.edited ? (
               <span class="mr-1 italic opacity-80">editado</span>
             ) : null}
@@ -230,6 +254,24 @@ interface AttachmentItemProps {
   a: ChatAttachment;
   mine: boolean;
   onOpen: (a: ChatAttachment) => void;
+}
+
+function PinIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      class="inline-block h-3 w-3"
+      aria-label="Fijado"
+    >
+      <path d="M12 17v5" />
+      <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z" />
+    </svg>
+  );
 }
 
 function AttachmentItem({ a, mine, onOpen }: AttachmentItemProps) {
