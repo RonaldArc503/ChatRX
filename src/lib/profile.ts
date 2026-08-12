@@ -23,12 +23,16 @@ export interface UserProfile {
 }
 
 export function normalizePhone(raw: string): string {
-  return raw.replace(/\D/g, "");
+  const digits = raw.replace(/\D/g, "");
+  return digits.startsWith("503") && digits.length > 8
+    ? digits.slice(3)
+    : digits;
 }
 
 export function formatPhone(raw: string): string {
   const num = normalizePhone(raw);
   if (!num) return "";
+  if (num.length === 8) return `${num.slice(0, 4)} ${num.slice(4)}`;
   if (num.length <= 6) return num;
   return `+${num.slice(0, 2)} ${num.slice(2, 5)} ${num.slice(5, 8)} ${num.slice(8)}`.trim();
 }
@@ -138,7 +142,7 @@ export async function searchProfiles(term: string): Promise<UserProfile[]> {
   const results = new Map<string, UserProfile>();
 
   const typed = normalizePhone(t);
-  if (typed.length >= 7) {
+  if (typed.length >= 8) {
     const snap = await getDocs(query(col, where("phone", "==", typed)));
     snap.forEach((d) =>
       results.set(d.id, { uid: d.id, ...(d.data() as Omit<UserProfile, "uid">) }),

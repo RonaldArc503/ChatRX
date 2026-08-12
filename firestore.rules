@@ -18,6 +18,25 @@ service cloud.firestore {
       allow update: if false;
     }
 
+    // Presencia en linea (cada uno escribe solo su propio estado)
+    match /presence/{uid} {
+      allow read: if request.auth != null;
+      allow create, update, delete: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Indicador "escribiendo..." por conversacion (cada participante toca solo su campo)
+    match /typing/{convId} {
+      allow read: if request.auth != null
+        && request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participantIds;
+      allow create: if request.auth != null
+        && request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participantIds
+        && request.resource.data.keys().hasOnly([request.auth.uid]);
+      allow update: if request.auth != null
+        && request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participantIds
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([request.auth.uid]);
+      allow delete: if false;
+    }
+
     // Conversaciones 1:1
     match /conversations/{convId} {
       allow read: if request.auth != null
@@ -30,10 +49,21 @@ service cloud.firestore {
         allow read: if request.auth != null && request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participantIds;
         allow create: if request.auth != null
           && request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participantIds
-          && request.resource.data.senderId == request.auth.uid;
+          && request.resource.data.senderId == request.auth.uid
+          && (!('attachments' in request.resource.data)
+              || (request.resource.data.attachments is list
+                  && request.resource.data.attachments.size() > 0
+                  && request.resource.data.attachments.size() <= 10));
         allow update: if request.auth != null
           && request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participantIds
-          && request.auth.uid == resource.data.senderId;
+          && (
+            // El autor puede editar el contenido
+            request.auth.uid == resource.data.senderId
+            // Cualquier participante puede reaccionar sin tocar el contenido
+            || (request.resource.data.text == resource.data.text
+              && request.resource.data.senderId == resource.data.senderId
+              && request.resource.data.createdAt == resource.data.createdAt)
+          );
         allow delete: if request.auth != null
           && request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participantIds
           && request.auth.uid == resource.data.senderId;

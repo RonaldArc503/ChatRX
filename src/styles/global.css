@@ -1,7 +1,20 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
+  color-scheme: light;
   --nav-h: calc(4.25rem + env(safe-area-inset-bottom));
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --nav-h: 3.5rem;
+  }
+}
+
+.dark {
+  color-scheme: dark;
 }
 
 @theme {

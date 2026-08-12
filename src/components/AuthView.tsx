@@ -45,8 +45,8 @@ export function AuthView() {
         return;
       }
       const normalizedPhone = normalizePhone(phone);
-      if (normalizedPhone.length < 8) {
-        setError("Ingresa un número de teléfono válido.");
+      if (normalizedPhone.length !== 8) {
+        setError("El número de teléfono debe tener 8 dígitos (El Salvador).");
         return;
       }
       const taken = await searchProfiles(normalizedPhone);
@@ -93,23 +93,23 @@ export function AuthView() {
     <div class="flex min-h-screen items-center justify-center px-4 py-10">
       <div class="w-full max-w-md">
         <div class="mb-8 text-center">
-          <h1 class="text-4xl font-extrabold tracking-tight text-slate-900">
+          <h1 class="text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white">
             Taskly
           </h1>
-          <p class="mt-2 text-sm text-slate-500">
+          <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">
             Organiza tus tareas en la nube y llévalas contigo.
           </p>
         </div>
 
-        <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div class="mb-6 grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1">
+        <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div class="mb-6 grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
             <button
               type="button"
               class={
                 "rounded-lg px-3 py-2 text-sm font-semibold transition-colors" +
                 (mode === "login"
-                  ? " bg-white text-slate-900 shadow-sm"
-                  : " text-slate-500 hover:text-slate-700")
+                  ? " bg-white text-slate-900 shadow-sm dark:bg-slate-900 dark:text-white"
+                  : " text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200")
               }
               onClick={() => {
                 setMode("login");
@@ -123,8 +123,8 @@ export function AuthView() {
               class={
                 "rounded-lg px-3 py-2 text-sm font-semibold transition-colors" +
                 (mode === "register"
-                  ? " bg-white text-slate-900 shadow-sm"
-                  : " text-slate-500 hover:text-slate-700")
+                  ? " bg-white text-slate-900 shadow-sm dark:bg-slate-900 dark:text-white"
+                  : " text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200")
               }
               onClick={() => {
                 setMode("register");
@@ -136,10 +136,10 @@ export function AuthView() {
           </div>
 
           <form class="flex flex-col gap-3" onSubmit={handleSubmit}>
-            <label class="flex flex-col gap-1 text-sm font-medium text-slate-700">
+            <label class="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
               Correo electrónico
               <input
-                class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base shadow-sm placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base shadow-sm placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
                 type="email"
                 required
                 value={email}
@@ -151,10 +151,10 @@ export function AuthView() {
               />
             </label>
 
-            <label class="flex flex-col gap-1 text-sm font-medium text-slate-700">
+            <label class="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
               Contraseña
               <input
-                class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base shadow-sm placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base shadow-sm placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
                 type="password"
                 required
                 value={password}
@@ -168,10 +168,10 @@ export function AuthView() {
 
             {mode === "register" ? (
               <>
-                <label class="flex flex-col gap-1 text-sm font-medium text-slate-700">
+                <label class="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
                   Confirmar contraseña
                   <input
-                    class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base shadow-sm placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                    class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base shadow-sm placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
                     type="password"
                     required
                     value={confirm}
@@ -183,14 +183,14 @@ export function AuthView() {
                   />
                 </label>
 
-                <label class="flex flex-col gap-1 text-sm font-medium text-slate-700">
+                <label class="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
                   Teléfono
                   <input
-                    class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base shadow-sm placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                    class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base shadow-sm placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
                     type="tel"
                     required
                     value={phone}
-                    placeholder="+52 55 1234 5678"
+                    placeholder="1234 5678"
                     autocomplete="tel"
                     onInput={(event) =>
                       setPhone((event.target as HTMLInputElement).value)
@@ -201,7 +201,7 @@ export function AuthView() {
             ) : null}
 
             {error ? (
-              <p class="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+              <p class="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-500/10 dark:text-red-400">
                 {error}
               </p>
             ) : null}
@@ -216,17 +216,17 @@ export function AuthView() {
             </button>
           </form>
 
-          <div class="my-5 flex items-center gap-3 text-xs text-slate-400">
-            <span class="h-px flex-1 bg-slate-200" />
+          <div class="my-5 flex items-center gap-3 text-xs text-slate-400 dark:text-slate-500">
+            <span class="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
             o continúa con
-            <span class="h-px flex-1 bg-slate-200" />
+            <span class="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
           </div>
 
           <button
             type="button"
             disabled={busy}
             onClick={handleGoogle}
-            class="flex w-full items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-base font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-60"
+            class="flex w-full items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-base font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
           >
             {GOOGLE_ICON}
             Continuar con Google

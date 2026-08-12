@@ -41,12 +41,12 @@ export function NewChatSearch({ me, onPick, onCancel }: NewChatSearchProps) {
 
   return (
     <div class="flex min-h-0 flex-1 flex-col">
-      <div class="flex items-center gap-2 border-b border-slate-200 px-3 py-2">
+      <div class="flex items-center gap-2 border-b border-slate-200 px-3 py-2 dark:border-slate-800">
         <button
           type="button"
           aria-label="Volver"
           onClick={onCancel}
-          class="grid h-9 w-9 flex-none place-items-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
+          class="grid h-9 w-9 flex-none place-items-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-5 w-5">
             <path d="M19 12H5" />
@@ -54,7 +54,7 @@ export function NewChatSearch({ me, onPick, onCancel }: NewChatSearchProps) {
           </svg>
         </button>
         <input
-          class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm shadow-sm placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+          class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm shadow-sm placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500"
           autoFocus
           value={query}
           placeholder="Busca por teléfono o correo…"
@@ -64,16 +64,16 @@ export function NewChatSearch({ me, onPick, onCancel }: NewChatSearchProps) {
 
       <div class="flex-1 overflow-y-auto">
         {!me.phone ? (
-          <p class="px-4 py-3 text-xs text-amber-700">
+          <p class="px-4 py-3 text-xs text-amber-700 dark:text-amber-400">
             Aún no tienes un teléfono en tu perfil. Agrégalo para que otros te
             encuentren.
           </p>
         ) : null}
 
         {busy ? (
-          <p class="px-4 py-6 text-center text-sm text-slate-400">Buscando…</p>
+          <p class="px-4 py-6 text-center text-sm text-slate-400 dark:text-slate-500">Buscando…</p>
         ) : query.trim().length >= 2 && results.length === 0 ? (
-          <p class="px-4 py-6 text-center text-sm text-slate-400">
+          <p class="px-4 py-6 text-center text-sm text-slate-400 dark:text-slate-500">
             {selfOnly
               ? "Ya puedes escribirte desde «Mensajes guardados» en tu lista de chats."
               : `Sin resultados para “${query.trim()}”.`}
@@ -84,15 +84,15 @@ export function NewChatSearch({ me, onPick, onCancel }: NewChatSearchProps) {
               <li key={peer.uid}>
                 <button
                   type="button"
-                  class="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50"
+                  class="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/60"
                   onClick={() => onPick(peer)}
                 >
                   <Avatar uid={peer.uid} name={peer.displayName} photoURL={peer.photoURL} size="sm" />
                   <span class="min-w-0">
-                    <span class="block truncate text-sm font-semibold text-slate-800">
+                    <span class="block truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
                       {peer.displayName}
                     </span>
-                    <span class="block truncate text-xs text-slate-500">
+                    <span class="block truncate text-xs text-slate-500 dark:text-slate-400">
                       {peer.phone || peer.email || "Sin contacto"}
                     </span>
                   </span>
@@ -101,9 +101,8 @@ export function NewChatSearch({ me, onPick, onCancel }: NewChatSearchProps) {
             ))}
           </ul>
         ) : (
-          <p class="px-4 py-6 text-center text-sm text-slate-400">
-            Escribe un número de teléfono (mínimo 7 dígitos) o un correo
-            completo.
+          <p class="px-4 py-6 text-center text-sm text-slate-400 dark:text-slate-500">
+            Escribe un número de teléfono (8 dígitos) o un correo completo.
           </p>
         )}
       </div>

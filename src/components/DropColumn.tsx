@@ -52,28 +52,28 @@ export function DropColumn({
   return (
     <section
       class={
-        "overflow-hidden rounded-2xl border bg-white shadow-sm transition-[border-color,box-shadow]" +
+        "overflow-hidden rounded-2xl border bg-white shadow-sm transition-[border-color,box-shadow] dark:bg-slate-900" +
         (over
           ? " border-indigo-400 ring-2 ring-indigo-100"
-          : " border-slate-200") +
+          : " border-slate-200 dark:border-slate-800") +
         (active ? " block" : " hidden") +
         " lg:block"
       }
       data-status={status}
     >
-      <header class="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
+      <header class="flex items-center gap-2 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
         <span
           class={"h-2.5 w-2.5 flex-none rounded-full " + DOT_STYLES[status]}
           aria-hidden="true"
         />
-        <h2 class="flex-1 text-sm font-bold text-slate-700">{meta.label}</h2>
-        <span class="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium tabular-nums text-slate-500">
+        <h2 class="flex-1 text-sm font-bold text-slate-700 dark:text-slate-200">{meta.label}</h2>
+        <span class="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium tabular-nums text-slate-500 dark:bg-slate-800 dark:text-slate-400">
           {count}
         </span>
         {onClear ? (
           <button
             type="button"
-            class="grid h-7 w-7 flex-none place-items-center rounded-lg text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
+            class="grid h-7 w-7 flex-none place-items-center rounded-lg text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10"
             onClick={onClear}
             aria-label="Limpiar completadas"
           >

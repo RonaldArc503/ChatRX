@@ -5,30 +5,76 @@ import {
   markConversationRead,
   sendMessage,
   subscribeMessages,
+  toggleReaction,
+  type ChatAttachment,
   type ChatConversation,
   type ChatMessage,
 } from "../../lib/chat";
+import {
+  classificationFor,
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENTS_PER_MESSAGE,
+  uploadToCloudinary,
+} from "../../lib/cloudinary";
+import {
+  clearTyping,
+  setTyping,
+  subscribeTyping,
+} from "../../lib/typing";
+import type { Presence } from "../../lib/presence";
 import type { UserProfile } from "../../lib/profile";
+import { AttachmentLightbox } from "./AttachmentLightbox";
 import { Avatar } from "./Avatar";
 import { peerOf } from "./ConversationList";
 import { MessageActionsSheet } from "./MessageActionsSheet";
 import { MessageBubble } from "./MessageBubble";
-import { formatDayLabel, sameDay } from "./time";
+import { formatDayLabel, formatTime, sameDay } from "./time";
+
+interface AttachmentDraft {
+  id: string;
+  file: File;
+  kind: "image" | "video" | "pdf" | "doc" | "file";
+  status: "ready" | "uploading" | "done" | "error";
+  progress: number;
+  error?: string;
+  attach?: ChatAttachment;
+  previewUrl?: string;
+}
 
 interface ConversationWindowProps {
   me: UserProfile;
   conv: ChatConversation;
+  peerPresence?: Presence | null;
   onBack: () => void;
 }
 
-export function ConversationWindow({ me, conv, onBack }: ConversationWindowProps) {
+export function ConversationWindow({
+  me,
+  conv,
+  peerPresence,
+  onBack,
+}: ConversationWindowProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [text, setText] = useState("");
   const [sendError, setSendError] = useState<string | null>(null);
   const [menuMsg, setMenuMsg] = useState<ChatMessage | null>(null);
   const [editing, setEditing] = useState<ChatMessage | null>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const [replyMsg, setReplyMsg] = useState<ChatMessage | null>(null);
+  const [typingMap, setTypingMap] = useState<Record<string, number>>({});
+  const [now, setNow] = useState(() => Date.now());
+  const [showJump, setShowJump] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<AttachmentDraft[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [lightbox, setLightbox] = useState<{
+    a: ChatAttachment;
+    caption: string;
+  } | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const stickRef = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const lastTypingSent = useRef(0);
+  const NEAR_BOTTOM_PX = 120;
 
   const peer = peerOf(conv, me.uid);
 
@@ -37,18 +83,51 @@ export function ConversationWindow({ me, conv, onBack }: ConversationWindowProps
   }, [conv.id]);
 
   useEffect(() => {
+    return subscribeTyping(conv.id, setTypingMap);
+  }, [conv.id]);
+
+  useEffect(() => {
     markConversationRead(conv.id, me.uid);
   }, [messages, conv.id, me.uid]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages.length]);
+    stickRef.current = true;
+    setShowJump(false);
+    const frame = requestAnimationFrame(() => {
+      const el = scrollRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [conv.id]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || messages.length === 0) return;
+    if (stickRef.current) {
+      el.scrollTop = el.scrollHeight;
+      setShowJump(false);
+    } else if (el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX) {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    } else {
+      setShowJump(true);
+    }
+  }, [messages]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1500);
+    return () => window.clearInterval(id);
+  }, []);
 
   useEffect(() => {
     setEditing(null);
     setMenuMsg(null);
+    setReplyMsg(null);
     setText("");
     setSendError(null);
+    setLightbox(null);
+    setUploading(false);
+    clearDraftUrls();
+    setPendingFiles([]);
   }, [conv.id]);
 
   useEffect(() => {
@@ -58,9 +137,148 @@ export function ConversationWindow({ me, conv, onBack }: ConversationWindowProps
     }
   }, [editing]);
 
+  useEffect(() => {
+    return () => clearTyping(conv.id, me.uid);
+  }, [conv.id, me.uid]);
+
+  const typingFrom = peer.isSelf ? undefined : typingMap[peer.uid];
+  const peerTyping = typingFrom !== undefined && now - typingFrom < 3500;
+
   function autoGrow(el: HTMLTextAreaElement) {
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 128) + "px";
+  }
+
+  function isNearBottom(el: HTMLDivElement): boolean {
+    return el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
+  }
+
+  function handleScroll() {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (isNearBottom(el)) {
+      stickRef.current = true;
+      setShowJump(false);
+    } else if (stickRef.current) {
+      stickRef.current = false;
+    }
+  }
+
+  function jumpToBottom() {
+    stickRef.current = true;
+    setShowJump(false);
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }
+
+  function clearDraftUrls() {
+    setPendingFiles((prev) => {
+      prev.forEach((d) => {
+        if (d.previewUrl) URL.revokeObjectURL(d.previewUrl);
+      });
+      return prev;
+    });
+  }
+
+  function handleFilesChange(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const files = Array.from(input.files ?? []);
+    input.value = "";
+    if (files.length === 0 || uploading) return;
+    setSendError(null);
+    setPendingFiles((prev) => {
+      const next = [...prev];
+      for (const file of files) {
+        if (next.length >= MAX_ATTACHMENTS_PER_MESSAGE) break;
+        const id = `d-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+        const kind = classificationFor(file);
+        const tooBig = file.size > MAX_ATTACHMENT_BYTES;
+        next.push({
+          id,
+          file,
+          kind,
+          status: tooBig ? "error" : "ready",
+          progress: 0,
+          error: tooBig ? "Excede 20 MB" : undefined,
+          previewUrl:
+            kind === "image" || kind === "video"
+              ? URL.createObjectURL(file)
+              : undefined,
+        });
+      }
+      return next;
+    });
+  }
+
+  function removeDraft(id: string) {
+    setPendingFiles((prev) => {
+      const draft = prev.find((d) => d.id === id);
+      if (draft?.previewUrl) URL.revokeObjectURL(draft.previewUrl);
+      return prev.filter((d) => d.id !== id);
+    });
+  }
+
+  async function uploadDraft(d: AttachmentDraft): Promise<ChatAttachment | null> {
+    if (d.file.size > MAX_ATTACHMENT_BYTES) {
+      setPendingFiles((prev) =>
+        prev.map((x) =>
+          x.id === d.id ? { ...x, status: "error" as const, error: "Excede 20 MB" } : x,
+        ),
+      );
+      return null;
+    }
+    setPendingFiles((prev) =>
+      prev.map((x) =>
+        x.id === d.id ? { ...x, status: "uploading" as const, progress: 0 } : x,
+      ),
+    );
+    try {
+      const res = await uploadToCloudinary(d.file, me.uid, (p) => {
+        setPendingFiles((prev) =>
+          prev.map((x) => (x.id === d.id ? { ...x, progress: p } : x)),
+        );
+      });
+      const attach: ChatAttachment = {
+        kind: d.kind,
+        resourceType: res.resourceType,
+        url: res.url,
+        publicId: res.publicId,
+        name: d.file.name,
+        size: res.bytes || d.file.size,
+        mimeType: d.file.type,
+      };
+      if (res.width !== undefined) attach.width = res.width;
+      if (res.height !== undefined) attach.height = res.height;
+      if (res.duration !== undefined) attach.duration = res.duration;
+      if (res.pages !== undefined) attach.pages = res.pages;
+      setPendingFiles((prev) =>
+        prev.map((x) =>
+          x.id === d.id ? { ...x, status: "done" as const, progress: 100, attach } : x,
+        ),
+      );
+      return attach;
+    } catch (err) {
+      setPendingFiles((prev) =>
+        prev.map((x) =>
+          x.id === d.id
+            ? {
+                ...x,
+                status: "error" as const,
+                error: err instanceof Error ? err.message : "No se pudo subir.",
+              }
+            : x,
+        ),
+      );
+      return null;
+    }
+  }
+
+  function bumpTyping(hasText: boolean) {
+    if (!hasText || editing) return;
+    const t = Date.now();
+    if (t - lastTypingSent.current < 2000) return;
+    lastTypingSent.current = t;
+    setTyping(conv.id, me.uid);
   }
 
   function handleKeyDown(e: KeyboardEvent) {
@@ -72,10 +290,11 @@ export function ConversationWindow({ me, conv, onBack }: ConversationWindowProps
 
   async function handleSubmit() {
     const value = text.trim();
-    if (!value) return;
     setSendError(null);
+    clearTyping(conv.id, me.uid);
 
     if (editing) {
+      if (!value) return;
       try {
         await editMessage(conv.id, editing.id, value);
         setEditing(null);
@@ -89,9 +308,80 @@ export function ConversationWindow({ me, conv, onBack }: ConversationWindowProps
       return;
     }
 
+    const hasPending = pendingFiles.length > 0;
+    if (!value && !hasPending) return;
+
+    if (hasPending) {
+      if (uploading) return;
+      setUploading(true);
+      const doneAtts = pendingFiles
+        .filter((d) => d.status === "done" && d.attach)
+        .map((d) => d.attach as ChatAttachment);
+      const toUpload = pendingFiles.filter(
+        (d) => d.status !== "done" && d.file.size <= MAX_ATTACHMENT_BYTES,
+      );
+      let failed = 0;
+      const newly: ChatAttachment[] = [];
+      for (const d of toUpload) {
+        const att = await uploadDraft(d);
+        if (att) newly.push(att);
+        else failed++;
+      }
+      setUploading(false);
+
+      if (failed > 0) {
+        setSendError(
+          "Algunos archivos no se subieron. Reintenta o elimínalos.",
+        );
+        return;
+      }
+
+      const allAtts = [...doneAtts, ...newly];
+      if (allAtts.length === 0) return;
+      try {
+        await sendMessage(
+          conv.id,
+          me.uid,
+          value,
+          replyMsg
+            ? {
+                id: replyMsg.id,
+                text: replyMsg.text,
+                senderId: replyMsg.senderId,
+              }
+            : null,
+          allAtts,
+        );
+        clearDraftUrls();
+        setPendingFiles([]);
+        setReplyMsg(null);
+        setText("");
+        stickRef.current = true;
+        setShowJump(false);
+        if (inputRef.current) inputRef.current.style.height = "auto";
+      } catch (err) {
+        setSendError(err instanceof Error ? err.message : "No se pudo enviar.");
+      }
+      return;
+    }
+
     setText("");
+    stickRef.current = true;
+    setShowJump(false);
     try {
-      await sendMessage(conv.id, me.uid, value);
+      await sendMessage(
+        conv.id,
+        me.uid,
+        value,
+        replyMsg
+          ? {
+              id: replyMsg.id,
+              text: replyMsg.text,
+              senderId: replyMsg.senderId,
+            }
+          : null,
+      );
+      setReplyMsg(null);
       if (inputRef.current) {
         inputRef.current.style.height = "auto";
       }
@@ -102,8 +392,26 @@ export function ConversationWindow({ me, conv, onBack }: ConversationWindowProps
 
   function handleEdit(m: ChatMessage) {
     setMenuMsg(null);
+    setReplyMsg(null);
     setEditing(m);
     setText(m.text);
+  }
+
+  function handleReply(m: ChatMessage) {
+    setMenuMsg(null);
+    setEditing(null);
+    setReplyMsg(m);
+  }
+
+  async function handleReact(m: ChatMessage, emoji: string) {
+    setMenuMsg(null);
+    try {
+      await toggleReaction(conv.id, m.id, me.uid, emoji);
+    } catch (err) {
+      setSendError(
+        err instanceof Error ? err.message : "No se pudo reaccionar.",
+      );
+    }
   }
 
   async function handleDelete(m: ChatMessage) {
@@ -117,13 +425,18 @@ export function ConversationWindow({ me, conv, onBack }: ConversationWindowProps
     }
   }
 
+  function lastSeenText(ts: number): string {
+    if (!ts) return "Sin conexión";
+    return `Visto ${formatDayLabel(ts)} · ${formatTime(ts)}`;
+  }
+
   const items: preact.ComponentChildren[] = [];
   messages.forEach((msg, i) => {
     const previous = messages[i - 1];
     if (!previous || !sameDay(previous.createdAt, msg.createdAt)) {
       items.push(
         <div key={"day-" + msg.id} class="flex justify-center py-2">
-          <span class="rounded-full bg-slate-200/70 px-3 py-1 text-[11px] font-semibold text-slate-600">
+          <span class="rounded-full bg-slate-200/70 px-3 py-1 text-[11px] font-semibold text-slate-600 dark:bg-slate-700/60 dark:text-slate-300">
             {formatDayLabel(msg.createdAt)}
           </span>
         </div>,
@@ -134,19 +447,22 @@ export function ConversationWindow({ me, conv, onBack }: ConversationWindowProps
         key={msg.id}
         msg={msg}
         mine={msg.senderId === me.uid}
+        uid={me.uid}
         onOpenMenu={setMenuMsg}
+        onReact={handleReact}
+        onOpenAttachment={(m, a) => setLightbox({ a, caption: m.text })}
       />,
     );
   });
 
   return (
     <div class="flex min-h-0 flex-1 flex-col">
-      <header class="flex items-center gap-3 border-b border-slate-200 bg-white px-3 py-2.5">
+      <header class="flex items-center gap-3 border-b border-slate-200 bg-white px-3 py-2.5 dark:border-slate-800 dark:bg-slate-900">
         <button
           type="button"
           aria-label="Volver a la lista"
           onClick={onBack}
-          class="grid h-9 w-9 flex-none place-items-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 lg:hidden"
+          class="grid h-9 w-9 flex-none place-items-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200 lg:hidden"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-5 w-5">
             <path d="M19 12H5" />
@@ -155,32 +471,95 @@ export function ConversationWindow({ me, conv, onBack }: ConversationWindowProps
         </button>
         <Avatar uid={peer.uid} name={peer.name} photoURL={peer.photoURL} size="sm" />
         <div class="min-w-0">
-          <h2 class="truncate text-sm font-bold text-slate-800">{peer.name}</h2>
+          <h2 class="truncate text-sm font-bold text-slate-800 dark:text-slate-100">
+            {peer.name}
+          </h2>
           {peer.isSelf ? (
-            <p class="truncate text-xs text-slate-500">Escribirte a ti mismo</p>
+            <p class="truncate text-xs text-slate-500 dark:text-slate-400">
+              Escribirte a ti mismo
+            </p>
+          ) : peerTyping ? (
+            <p class="truncate text-xs font-medium text-indigo-600 dark:text-indigo-400">
+              escribiendo…
+            </p>
+          ) : peerPresence?.online ? (
+            <p class="truncate text-xs font-medium text-emerald-600 dark:text-emerald-400">
+              En línea
+            </p>
+          ) : peerPresence ? (
+            <p class="truncate text-xs text-slate-500 dark:text-slate-400">
+              {lastSeenText(peerPresence.lastSeen)}
+            </p>
           ) : (
-            <p class="truncate text-xs text-slate-500">{peer.phone || peer.uid}</p>
+            <p class="truncate text-xs text-slate-500 dark:text-slate-400">
+              {peer.phone || peer.uid}
+            </p>
           )}
         </div>
       </header>
 
-      <div class="flex-1 overflow-y-auto bg-slate-50 px-3 py-4">
-        {messages.length === 0 ? (
-          <div class="flex h-full flex-col items-center justify-center gap-2 text-center">
-            <p class="text-sm font-semibold text-slate-600">
-              Esta es tu conversación con {peer.name}.
-            </p>
-            <p class="text-xs text-slate-400">Escribe el primer mensaje.</p>
-          </div>
-        ) : (
-          <div class="flex flex-col gap-2">{items}</div>
-        )}
-        <div ref={bottomRef} />
+      <div class="relative min-h-0 flex-1">
+        <div
+          class="h-full overflow-y-auto bg-slate-50 px-3 py-4 dark:bg-slate-950"
+          ref={scrollRef}
+          onScroll={handleScroll}
+        >
+          {messages.length === 0 ? (
+            <div class="flex h-full flex-col items-center justify-center gap-2 text-center">
+              <p class="text-sm font-semibold text-slate-600 dark:text-slate-300">
+                Esta es tu conversación con {peer.name}.
+              </p>
+              <p class="text-xs text-slate-400 dark:text-slate-500">
+                Escribe el primer mensaje.
+              </p>
+            </div>
+          ) : (
+            <div class="flex flex-col gap-2">{items}</div>
+          )}
+        </div>
+
+        {showJump ? (
+          <button
+            type="button"
+            onClick={jumpToBottom}
+            class="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-indigo-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-lg transition-colors hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-400"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" class="h-3.5 w-3.5">
+              <path d="M12 5v14" />
+              <path d="m19 12-7 7-7-7" />
+            </svg>
+            Último mensaje
+          </button>
+        ) : null}
       </div>
 
+      {replyMsg ? (
+        <div class="flex items-center justify-between gap-2 border-t border-slate-200 bg-indigo-50 px-4 py-2 dark:border-slate-700 dark:bg-indigo-500/15">
+          <span class="flex min-w-0 items-center gap-2 text-xs font-semibold text-indigo-700 dark:text-indigo-300">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-4 w-4 flex-none">
+              <path d="m3 11 9-9v5c6 1 9 5 9 11-2-4-5-5-9-5v5Z" />
+            </svg>
+            <span class="min-w-0">
+              <span class="block truncate text-indigo-700/80 dark:text-indigo-300/80">
+                Respondiendo a {peer.name}
+              </span>
+              <span class="block truncate font-normal">{replyMsg.text}</span>
+            </span>
+          </span>
+          <button
+            type="button"
+            aria-label="Cancelar respuesta"
+            onClick={() => setReplyMsg(null)}
+            class="grid h-6 w-6 flex-none place-items-center rounded-lg text-indigo-400 transition-colors hover:bg-indigo-100 hover:text-indigo-600 dark:hover:bg-indigo-500/20"
+          >
+            ✕
+          </button>
+        </div>
+      ) : null}
+
       {editing ? (
-        <div class="flex items-center justify-between gap-2 border-t border-slate-200 bg-amber-50 px-4 py-2">
-          <span class="flex items-center gap-2 text-xs font-semibold text-amber-800">
+        <div class="flex items-center justify-between gap-2 border-t border-slate-200 bg-amber-50 px-4 py-2 dark:border-slate-700 dark:bg-amber-500/15">
+          <span class="flex items-center gap-2 text-xs font-semibold text-amber-800 dark:text-amber-300">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-4 w-4">
               <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
             </svg>
@@ -193,30 +572,147 @@ export function ConversationWindow({ me, conv, onBack }: ConversationWindowProps
               setText("");
               if (inputRef.current) inputRef.current.style.height = "auto";
             }}
-            class="rounded-lg px-2 py-1 text-xs font-semibold text-amber-700 transition-colors hover:bg-amber-100"
+            class="rounded-lg px-2 py-1 text-xs font-semibold text-amber-700 transition-colors hover:bg-amber-100 dark:text-amber-400 dark:hover:bg-amber-500/20"
           >
             Cancelar
           </button>
         </div>
       ) : null}
 
-      <form class="flex items-end gap-2 border-t border-slate-200 bg-white p-3" onSubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
+      {pendingFiles.length > 0 && !editing ? (
+        <div class="border-t border-slate-200 bg-slate-50 px-3 pt-3 dark:border-slate-800 dark:bg-slate-900">
+          <div class="flex items-center justify-between">
+            <p class="mb-2 text-xs font-semibold text-slate-500 dark:text-slate-400">
+              Adjuntos ({pendingFiles.length})
+            </p>
+            {uploading ? (
+              <p class="mb-2 text-xs text-slate-400 dark:text-slate-500">
+                Subiendo…
+              </p>
+            ) : null}
+          </div>
+          <div class="flex gap-2 overflow-x-auto pb-3 no-scrollbar">
+            {pendingFiles.map((d) => (
+              <div
+                key={d.id}
+                class="relative h-16 w-16 flex-none overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800"
+              >
+                {d.previewUrl ? (
+                  <img
+                    src={d.previewUrl}
+                    alt={d.file.name}
+                    loading="lazy"
+                    class="h-full w-full object-cover"
+                  />
+                ) : (
+                  <span
+                    class={
+                      "grid h-full w-full place-items-center text-[11px] font-bold uppercase " +
+                      (d.kind === "pdf"
+                        ? "bg-red-50 text-red-500 dark:bg-red-500/10 dark:text-red-400"
+                        : "bg-indigo-50 text-indigo-500 dark:bg-indigo-500/10 dark:text-indigo-400")
+                    }
+                  >
+                    {d.kind === "pdf" ? "PDF" : d.file.name.split(".").pop()}
+                  </span>
+                )}
+
+                {d.status === "uploading" ? (
+                  <div class="absolute inset-0 grid place-items-center bg-black/45">
+                    <span class="text-xs font-bold text-white">
+                      {d.progress}%
+                    </span>
+                    <div class="absolute inset-x-0 bottom-0 h-1 bg-black/30">
+                      <div
+                        class="h-full bg-emerald-400 transition-all"
+                        style={{ width: `${d.progress}%` }}
+                      />
+                    </div>
+                  </div>
+                ) : null}
+
+                {d.status === "done" ? (
+                  <span class="absolute bottom-1 right-1 grid h-5 w-5 place-items-center rounded-full bg-emerald-500 text-white">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" class="h-3 w-3">
+                      <path d="M20 6 9 17l-5-5" />
+                    </svg>
+                  </span>
+                ) : null}
+
+                {d.status === "error" ? (
+                  <div class="absolute inset-0 grid place-items-center bg-red-500/30">
+                    <button
+                      type="button"
+                      aria-label="Reintentar"
+                      title={d.error || "Error al subir"}
+                      onClick={() => {
+                        setSendError(null);
+                        uploadDraft(d);
+                      }}
+                      class="grid h-8 w-8 place-items-center rounded-full bg-white text-red-600 shadow-md"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-4 w-4">
+                        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                        <path d="M3 3v5h5" />
+                      </svg>
+                    </button>
+                  </div>
+                ) : null}
+
+                <button
+                  type="button"
+                  aria-label="Quitar adjunto"
+                  onClick={() => removeDraft(d.id)}
+                  class="absolute right-0.5 top-0.5 grid h-5 w-5 place-items-center rounded-full bg-black/60 text-[10px] text-white"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      <form class="flex items-end gap-2 border-t border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900" onSubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,video/*,.pdf,.doc,.docx"
+          multiple
+          class="hidden"
+          onChange={handleFilesChange}
+        />
+        <button
+          type="button"
+          aria-label="Adjuntar archivo"
+          disabled={uploading || !!editing}
+          onClick={() => fileInputRef.current?.click()}
+          class="grid h-10 w-10 flex-none place-items-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 hover:text-indigo-600 disabled:opacity-40 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-indigo-400"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-5 w-5">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+            <path d="M14 2v6h6" />
+            <path d="M12 18v-6" />
+            <path d="m9 15 3 3 3-3" />
+          </svg>
+        </button>
         <textarea
           ref={inputRef}
           rows={1}
           value={text}
           placeholder={editing ? "Editar mensaje…" : "Escribe un mensaje…"}
-          class="no-scrollbar max-h-32 flex-1 resize-none rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+          class="no-scrollbar max-h-32 flex-1 resize-none rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-indigo-500"
           onInput={(e) => {
             const el = e.target as HTMLTextAreaElement;
             setText(el.value);
+            bumpTyping(el.value.trim().length > 0);
             autoGrow(el);
           }}
           onKeyDown={handleKeyDown}
         />
         <button
           type="submit"
-          disabled={!text.trim()}
+          disabled={uploading || (!text.trim() && pendingFiles.length === 0)}
           aria-label={editing ? "Guardar edición" : "Enviar mensaje"}
           class="grid h-10 w-10 flex-none place-items-center rounded-full bg-indigo-600 text-white shadow-sm transition-colors hover:bg-indigo-700 disabled:opacity-40"
         >
@@ -235,7 +731,7 @@ export function ConversationWindow({ me, conv, onBack }: ConversationWindowProps
       </form>
 
       {sendError ? (
-        <p class="border-t border-red-100 bg-red-50 px-4 py-2 text-xs text-red-600">
+        <p class="border-t border-red-100 bg-red-50 px-4 py-2 text-xs text-red-600 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-400">
           {sendError}
         </p>
       ) : null}
@@ -243,10 +739,21 @@ export function ConversationWindow({ me, conv, onBack }: ConversationWindowProps
       <MessageActionsSheet
         msg={menuMsg}
         mine={menuMsg !== null && menuMsg.senderId === me.uid}
+        uid={me.uid}
         onClose={() => setMenuMsg(null)}
         onEdit={handleEdit}
         onDelete={handleDelete}
+        onReply={handleReply}
+        onReact={handleReact}
       />
+
+      {lightbox ? (
+        <AttachmentLightbox
+          attachment={lightbox.a}
+          caption={lightbox.caption}
+          onClose={() => setLightbox(null)}
+        />
+      ) : null}
     </div>
   );
 }

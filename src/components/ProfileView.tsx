@@ -61,8 +61,8 @@ export function ProfileView({ user, onLogout }: ProfileViewProps) {
       return;
     }
     const normalized = normalizePhone(phone);
-    if (normalized.length < 8) {
-      setError("Ingresa un número de teléfono válido.");
+    if (normalized.length !== 8) {
+      setError("El número de teléfono debe tener 8 dígitos (El Salvador).");
       return;
     }
     setSaving(true);
@@ -92,7 +92,7 @@ export function ProfileView({ user, onLogout }: ProfileViewProps) {
   return (
     <div class="mx-auto w-full max-w-md">
       {needsPhone() ? (
-        <div class="mb-4 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+        <div class="mb-4 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="mt-0.5 h-5 w-5 flex-none">
             <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
             <path d="M12 9v4" />
@@ -106,15 +106,15 @@ export function ProfileView({ user, onLogout }: ProfileViewProps) {
       ) : null}
 
       <form
-        class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+        class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900"
         onSubmit={handleSave}
       >
-        <div class="flex flex-col items-center gap-3 border-b border-slate-100 pb-6 text-center">
+        <div class="flex flex-col items-center gap-3 border-b border-slate-100 pb-6 text-center dark:border-slate-800">
           {user.photoURL ? (
             <img
               src={user.photoURL}
               alt={`Foto de ${name}`}
-              class="h-20 w-20 rounded-full object-cover ring-4 ring-indigo-100"
+              class="h-20 w-20 rounded-full object-cover ring-4 ring-indigo-100 dark:ring-indigo-500/30"
             />
           ) : (
             <span class="grid h-20 w-20 place-items-center rounded-full bg-indigo-600 text-2xl font-bold text-white">
@@ -122,12 +122,12 @@ export function ProfileView({ user, onLogout }: ProfileViewProps) {
             </span>
           )}
           <div>
-            <h1 class="text-xl font-bold text-slate-800">{name}</h1>
+            <h1 class="text-xl font-bold text-slate-800 dark:text-slate-100">{name}</h1>
             {user.email ? (
-              <p class="mt-0.5 text-sm text-slate-500">{user.email}</p>
+              <p class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">{user.email}</p>
             ) : null}
             {profile?.phone ? (
-              <p class="mt-0.5 text-sm text-slate-400">
+              <p class="mt-0.5 text-sm text-slate-400 dark:text-slate-500">
                 {formatPhone(profile.phone)}
               </p>
             ) : null}
@@ -135,10 +135,10 @@ export function ProfileView({ user, onLogout }: ProfileViewProps) {
         </div>
 
         <div class="flex flex-col gap-3 py-4">
-          <label class="flex flex-col gap-1 text-sm font-medium text-slate-700">
+          <label class="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
             Nombre
             <input
-              class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base shadow-sm placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base shadow-sm placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
               type="text"
               value={displayName}
               placeholder="Tu nombre"
@@ -148,14 +148,14 @@ export function ProfileView({ user, onLogout }: ProfileViewProps) {
             />
           </label>
 
-          <label class="flex flex-col gap-1 text-sm font-medium text-slate-700">
+          <label class="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
             Teléfono
             <input
-              class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base shadow-sm placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base shadow-sm placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
               type="tel"
               value={phone}
               required
-              placeholder="+52 55 1234 5678"
+              placeholder="1234 5678"
               autocomplete="tel"
               onInput={(event) =>
                 setPhone((event.target as HTMLInputElement).value)
@@ -164,12 +164,12 @@ export function ProfileView({ user, onLogout }: ProfileViewProps) {
           </label>
 
           {error ? (
-            <p class="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+            <p class="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-500/10 dark:text-red-400">
               {error}
             </p>
           ) : null}
           {message ? (
-            <p class="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-600">
+            <p class="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">
               {message}
             </p>
           ) : null}
@@ -187,7 +187,7 @@ export function ProfileView({ user, onLogout }: ProfileViewProps) {
             type="button"
             disabled={busy}
             onClick={handleLogout}
-            class="flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-5 py-2.5 font-semibold text-red-600 transition-colors hover:bg-red-100 disabled:opacity-60"
+            class="flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-5 py-2.5 font-semibold text-red-600 transition-colors hover:bg-red-100 disabled:opacity-60 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20"
           >
             {busy ? <Spinner /> : null}
             Cerrar sesión

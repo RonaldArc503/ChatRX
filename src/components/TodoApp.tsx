@@ -136,14 +136,14 @@ export function TodoApp({ uid }: TodoAppProps) {
               style={{ width: `${progress}%` }}
             />
           </div>
-          <span class="whitespace-nowrap text-sm font-medium tabular-nums text-slate-500">
+          <span class="whitespace-nowrap text-sm font-medium tabular-nums text-slate-500 dark:text-slate-400">
             {doneCount}/{total} · {progress}%
             {progress === 100 && total > 0 ? " · ¡Día completado!" : ""}
           </span>
         </div>
 
         <nav
-          class="sticky top-3 z-10 flex gap-2 rounded-2xl bg-slate-100/90 p-1.5 backdrop-blur lg:hidden"
+          class="sticky top-3 z-10 flex gap-2 rounded-2xl bg-slate-100/90 p-1.5 backdrop-blur dark:bg-slate-800/80 lg:hidden"
           aria-label="Columnas"
         >
           {STATUS_ORDER.map((status) => (
@@ -153,8 +153,8 @@ export function TodoApp({ uid }: TodoAppProps) {
               class={
                 "flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2 py-2.5 text-sm font-semibold transition-colors" +
                 (tab === status
-                  ? " bg-white text-indigo-600 shadow-sm"
-                  : " text-slate-500 hover:text-slate-700")
+                  ? " bg-white text-indigo-600 shadow-sm dark:bg-slate-900 dark:text-indigo-400"
+                  : " text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200")
               }
               onClick={() => setTab(status)}
             >
@@ -162,7 +162,9 @@ export function TodoApp({ uid }: TodoAppProps) {
               <span
                 class={
                   "rounded-full px-2 py-0.5 text-xs tabular-nums" +
-                  (tab === status ? " bg-indigo-100 text-indigo-600" : " bg-slate-200/70")
+                  (tab === status
+                    ? " bg-indigo-100 text-indigo-600 dark:bg-indigo-500/25 dark:text-indigo-300"
+                    : " bg-slate-200/70 dark:bg-slate-700")
                 }
               >
                 {byStatus[status].length}
@@ -174,7 +176,7 @@ export function TodoApp({ uid }: TodoAppProps) {
 
       <form class="flex gap-2" onSubmit={addTodo}>
         <input
-          class="flex-1 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base shadow-sm placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+          class="flex-1 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base shadow-sm placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
           type="text"
           value={draft}
           placeholder="¿Qué necesitas hacer?"
@@ -200,7 +202,7 @@ export function TodoApp({ uid }: TodoAppProps) {
             active={tab === status}
           >
             {byStatus[status].length === 0 ? (
-              <li class="rounded-xl border-2 border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400">
+              <li class="rounded-xl border-2 border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400 dark:border-slate-700 dark:text-slate-500">
                 Sin tareas aquí
               </li>
             ) : (
@@ -219,7 +221,7 @@ export function TodoApp({ uid }: TodoAppProps) {
 
       {toast ? (
         <div
-          class="fixed inset-x-0 bottom-24 z-30 mx-auto w-fit max-w-[calc(100vw-2rem)] animate-toast-in lg:bottom-5"
+          class="fixed inset-x-0 bottom-24 z-30 mx-auto w-fit max-w-[calc(100vw-2rem)] animate-toast-in"
           role="status"
           aria-live="polite"
         >

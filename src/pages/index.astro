@@ -10,8 +10,19 @@ import "../styles/global.css";
 		<meta name="viewport" content="width=device-width" />
 		<meta name="generator" content={Astro.generator} />
 		<title>Taskly - Tus tareas</title>
+		<script is:inline>
+			(function () {
+				try {
+					var stored = localStorage.getItem("taskly-theme");
+					var dark = stored
+						? stored === "dark"
+						: window.matchMedia("(prefers-color-scheme: dark)").matches;
+					if (dark) document.documentElement.classList.add("dark");
+				} catch (e) {}
+			})();
+		</script>
 	</head>
-	<body class="min-h-screen bg-slate-100 text-slate-800 antialiased">
+	<body class="min-h-screen bg-slate-100 text-slate-800 antialiased dark:bg-slate-950 dark:text-slate-100">
 		<AppRoot client:load />
 	</body>
 </html>

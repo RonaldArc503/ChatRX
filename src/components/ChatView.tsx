@@ -8,19 +8,29 @@ import {
   type ChatConversation,
 } from "../lib/chat";
 import { getProfile, type UserProfile } from "../lib/profile";
-import { ConversationList } from "./chat/ConversationList";
+import { subscribePresence, type Presence } from "../lib/presence";
+import { ConversationList, peerOf } from "./chat/ConversationList";
 import { ConversationWindow } from "./chat/ConversationWindow";
 import { NewChatSearch } from "./chat/NewChatSearch";
 
 interface ChatViewProps {
   user: User;
+  targetId?: string | null;
+  onConsumeTarget?: () => void;
 }
 
-export function ChatView({ user }: ChatViewProps) {
+export function ChatView({ user, targetId, onConsumeTarget }: ChatViewProps) {
   const [me, setMe] = useState<UserProfile | null>(null);
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showNewChat, setShowNewChat] = useState(false);
+  const [presence, setPresence] = useState<Record<string, Presence>>({});
+
+  useEffect(() => {
+    if (!targetId) return;
+    setSelectedId(targetId);
+    onConsumeTarget?.();
+  }, [targetId]);
 
   useEffect(() => {
     getProfile(user.uid)
@@ -38,6 +48,31 @@ export function ChatView({ user }: ChatViewProps) {
   useEffect(() => {
     return subscribeConversations(user.uid, setConversations);
   }, [user.uid]);
+
+  const peerKey = conversations
+    .flatMap((c) => c.participantIds.filter((id) => id !== user.uid))
+    .sort()
+    .join(",");
+
+  useEffect(() => {
+    if (!me) return;
+    const peers = new Set(
+      conversations.flatMap((c) =>
+        c.participantIds.filter((id) => id !== user.uid),
+      ),
+    );
+    const subs = [...peers].map((pid) =>
+      subscribePresence(pid, (p) => {
+        setPresence((prev) => ({
+          ...prev,
+          [pid]: p ?? { online: false, lastSeen: 0 },
+        }));
+      }),
+    );
+    return () => {
+      subs.forEach((unsub) => unsub());
+    };
+  }, [peerKey, me?.uid, user.uid]);
 
   async function handlePick(peer: UserProfile) {
     if (!me) return;
@@ -85,6 +120,10 @@ export function ChatView({ user }: ChatViewProps) {
   const selectedConv =
     listConversations.find((c) => c.id === selectedId) ?? null;
   const panelOpen = selectedConv !== null;
+  const selectedPeer = selectedConv ? peerOf(selectedConv, user.uid) : null;
+  const peerPresence = selectedPeer
+    ? presence[selectedPeer.uid] ?? null
+    : null;
 
   const handleSelect = async (id: string) => {
     if (id === selfId && !hasSelf) {
@@ -94,10 +133,10 @@ export function ChatView({ user }: ChatViewProps) {
   };
 
   return (
-    <div class="fixed inset-x-0 top-0 z-30 flex h-[calc(100dvh-var(--nav-h))] min-h-0 flex-col overflow-hidden bg-white lg:static lg:z-auto lg:h-[calc(100vh-7rem)] lg:flex-row lg:rounded-2xl lg:border lg:border-slate-200 lg:shadow-sm">
+    <div class="fixed inset-x-0 top-0 z-30 flex h-[calc(100dvh-var(--nav-h))] min-h-0 flex-col overflow-hidden bg-white dark:bg-slate-900 lg:flex-row">
       <aside
         class={
-          "min-h-0 flex-col bg-white lg:w-80 lg:max-w-xs lg:shrink-0 lg:border-r lg:border-slate-200 " +
+          "min-h-0 flex-col bg-white dark:bg-slate-900 lg:w-80 lg:max-w-xs lg:shrink-0 lg:border-r lg:border-slate-200 lg:dark:border-slate-800 " +
           (panelOpen ? "hidden lg:flex" : "flex")
         }
       >
@@ -109,8 +148,8 @@ export function ChatView({ user }: ChatViewProps) {
           />
         ) : (
           <>
-            <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-              <h2 class="text-lg font-bold text-slate-900">Mensajes</h2>
+            <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
+              <h2 class="text-lg font-bold text-slate-900 dark:text-white">Mensajes</h2>
               <button
                 type="button"
                 aria-label="Nueva conversación"
@@ -128,16 +167,17 @@ export function ChatView({ user }: ChatViewProps) {
               uid={user.uid}
               selectedId={selectedId}
               onSelect={handleSelect}
+              presence={presence}
             />
           </>
         )}
       </aside>
 
-      <section
+<section
         class={
-"min-h-0 flex-col overflow-hidden bg-slate-50 " +
+          "min-h-0 flex-col overflow-hidden bg-slate-50 dark:bg-slate-900 " +
             (panelOpen
-              ? "absolute inset-0 z-40 flex lg:static lg:z-auto"
+              ? "absolute inset-0 z-40 flex lg:static lg:z-auto lg:flex-1"
               : "hidden lg:flex lg:flex-1 lg:items-center lg:justify-center")
         }
       >
@@ -145,20 +185,21 @@ export function ChatView({ user }: ChatViewProps) {
           <ConversationWindow
             me={me}
             conv={selectedConv}
+            peerPresence={peerPresence}
             onBack={() => setSelectedId(null)}
           />
         ) : (
           <div class="flex flex-col items-center gap-3 px-8 text-center">
-            <span class="grid h-16 w-16 place-items-center rounded-2xl bg-indigo-50 text-indigo-600">
+            <span class="grid h-16 w-16 place-items-center rounded-2xl bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-400">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-8 w-8">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
               </svg>
             </span>
             <div>
-              <p class="text-sm font-semibold text-slate-700">
+              <p class="text-sm font-semibold text-slate-700 dark:text-slate-300">
                 Selecciona una conversación
               </p>
-              <p class="mt-1 text-xs text-slate-500">
+              <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
                 O inicia una nueva con alguna de tus contactos.
               </p>
             </div>

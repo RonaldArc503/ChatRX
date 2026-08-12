@@ -14,19 +14,19 @@ const CARD_STYLES: Record<
   { item: string; title: string; chip: string }
 > = {
   todo: {
-    item: "border-l-amber-500",
+    item: "border-l-amber-500 dark:border-l-amber-500",
     title: "",
-    chip: "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100",
+    chip: "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300 dark:hover:bg-amber-500/25",
   },
   doing: {
-    item: "border-l-indigo-500",
+    item: "border-l-indigo-500 dark:border-l-indigo-500",
     title: "",
-    chip: "border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100",
+    chip: "border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:border-indigo-500/40 dark:bg-indigo-500/15 dark:text-indigo-300 dark:hover:bg-indigo-500/25",
   },
   done: {
-    item: "border-l-emerald-500",
-    title: "text-slate-400 line-through",
-    chip: "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100",
+    item: "border-l-emerald-500 dark:border-l-emerald-500",
+    title: "text-slate-400 line-through dark:text-slate-500",
+    chip: "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-300 dark:hover:bg-emerald-500/25",
   },
 };
 
@@ -67,7 +67,7 @@ export function TodoCard({ todo, onMove, onDelete }: TodoCardProps) {
   return (
     <li
       class={
-        "rounded-xl border border-slate-200 border-l-[3px] bg-white shadow-sm transition-[box-shadow,opacity] focus-visible:ring-2 focus-visible:ring-indigo-400" +
+        "rounded-xl border border-slate-200 border-l-[3px] bg-white shadow-sm transition-[box-shadow,opacity] focus-visible:ring-2 focus-visible:ring-indigo-400 dark:border-slate-700 dark:bg-slate-900" +
         (dragging ? " opacity-50" : "") +
         " " +
         styles.item
@@ -82,7 +82,7 @@ export function TodoCard({ todo, onMove, onDelete }: TodoCardProps) {
         className="flex items-center gap-1.5 p-2"
       >
         <span
-          class="flex-none cursor-grab select-none px-1 text-lg font-bold text-slate-300 transition-colors hover:text-slate-400"
+          class="flex-none cursor-grab select-none px-1 text-lg font-bold text-slate-300 transition-colors hover:text-slate-400 dark:text-slate-600 dark:hover:text-slate-500"
           draggable={canDrag}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}

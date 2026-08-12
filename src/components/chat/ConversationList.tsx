@@ -1,4 +1,5 @@
 import type { ChatConversation } from "../../lib/chat";
+import type { Presence } from "../../lib/presence";
 import { Avatar } from "./Avatar";
 import { formatTime } from "./time";
 
@@ -7,6 +8,7 @@ interface ConversationListProps {
   uid: string;
   selectedId: string | null;
   onSelect: (id: string) => void;
+  presence?: Record<string, Presence>;
 }
 
 export function peerOf(
@@ -40,18 +42,21 @@ export function ConversationList({
   uid,
   selectedId,
   onSelect,
+  presence,
 }: ConversationListProps) {
   if (conversations.length === 0) {
     return (
       <div class="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
-        <span class="grid h-14 w-14 place-items-center rounded-2xl bg-indigo-50 text-indigo-600">
+        <span class="grid h-14 w-14 place-items-center rounded-2xl bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-400">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-7 w-7">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
           </svg>
         </span>
         <div>
-          <p class="text-sm font-semibold text-slate-700">Sin conversaciones</p>
-          <p class="mt-1 text-xs text-slate-500">
+          <p class="text-sm font-semibold text-slate-700 dark:text-slate-300">
+            Sin conversaciones
+          </p>
+          <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
             Toca el lápiz arriba para contactar a alguien.
           </p>
         </div>
@@ -65,23 +70,34 @@ export function ConversationList({
         const peer = peerOf(conv, uid);
         const unread = conv.unread?.[uid] ?? 0;
         const active = conv.id === selectedId;
+        const online = presence?.[peer.uid]?.online ?? false;
         return (
           <li key={conv.id}>
             <button
               type="button"
               class={
                 "flex w-full items-center gap-3 px-4 py-3 text-left transition-colors " +
-                (active ? "bg-indigo-50" : "hover:bg-slate-50")
+                (active
+                  ? "bg-indigo-50 dark:bg-indigo-500/15"
+                  : "hover:bg-slate-50 dark:hover:bg-slate-800/60")
               }
               onClick={() => onSelect(conv.id)}
             >
-              <Avatar uid={peer.uid} name={peer.name} photoURL={peer.photoURL} size="sm" />
+              <span class="relative flex-none">
+                <Avatar uid={peer.uid} name={peer.name} photoURL={peer.photoURL} size="sm" />
+                {online && !peer.isSelf ? (
+                  <span
+                    class="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white bg-emerald-500 dark:border-slate-900"
+                    aria-label="En línea"
+                  />
+                ) : null}
+              </span>
               <span class="min-w-0 flex-1">
                 <span class="flex items-baseline justify-between gap-2">
-                  <span class="truncate text-sm font-semibold text-slate-800">
+                  <span class="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
                     {peer.name}
                   </span>
-                  <span class="flex-none text-[11px] text-slate-400">
+                  <span class="flex-none text-[11px] text-slate-400 dark:text-slate-500">
                     {formatTime(conv.lastMessageAt)}
                   </span>
                 </span>
@@ -89,7 +105,9 @@ export function ConversationList({
                   <span
                     class={
                       "truncate text-xs " +
-                      (unread > 0 ? "font-semibold text-slate-700" : "text-slate-500")
+                      (unread > 0
+                        ? "font-semibold text-slate-700 dark:text-slate-200"
+                        : "text-slate-500 dark:text-slate-400")
                     }
                   >
                     {peer.isSelf

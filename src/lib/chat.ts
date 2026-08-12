@@ -1,6 +1,7 @@
 import {
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getDoc,
   onSnapshot,
@@ -31,6 +32,26 @@ export interface ChatConversation {
   createdAt: number;
 }
 
+export interface ReplyInfo {
+  id: string;
+  text: string;
+  senderId: string;
+}
+
+export interface ChatAttachment {
+  kind: "image" | "video" | "pdf" | "doc" | "file";
+  resourceType: string;
+  url: string;
+  publicId: string;
+  name: string;
+  size: number;
+  mimeType: string;
+  width?: number;
+  height?: number;
+  duration?: number;
+  pages?: number;
+}
+
 export interface ChatMessage {
   id: string;
   senderId: string;
@@ -38,6 +59,9 @@ export interface ChatMessage {
   createdAt: number;
   edited?: boolean;
   editedAt?: number;
+  replyTo?: ReplyInfo | null;
+  reactions?: Record<string, string>;
+  attachments?: ChatAttachment[];
 }
 
 export function conversationId(uidA: string, uidB: string): string {
@@ -140,9 +164,11 @@ export async function sendMessage(
   convId: string,
   senderId: string,
   text: string,
+  replyTo?: ReplyInfo | null,
+  attachments?: ChatAttachment[],
 ): Promise<void> {
   const clean = text.trim();
-  if (!clean) return;
+  if (!clean && (!attachments || attachments.length === 0)) return;
   const convRef = doc(db!, "conversations", convId);
 
   await runTransaction(db!, async (tx) => {
@@ -158,8 +184,14 @@ export async function sendMessage(
     const otherId = data.participantIds.find((id) => id !== senderId);
     const msgRef = doc(collection(convRef, "messages"));
     const now = Date.now();
+    const preview =
+      !clean && attachments && attachments.length > 0
+        ? `📎 ${attachments[0].name}${
+            attachments.length > 1 ? ` (+${attachments.length - 1})` : ""
+          }`
+        : clean;
     const patch: Record<string, unknown> = {
-      lastMessage: clean,
+      lastMessage: preview,
       lastMessageAt: now,
       [`unread.${senderId}`]: 0,
     };
@@ -167,7 +199,17 @@ export async function sendMessage(
       patch[`unread.${otherId}`] = (data.unread?.[otherId] ?? 0) + 1;
     }
 
-    tx.set(msgRef, { senderId, text: clean, createdAt: now });
+    const msgData: Record<string, unknown> = {
+      senderId,
+      text: clean,
+      createdAt: now,
+    };
+    if (replyTo) msgData.replyTo = replyTo;
+    if (attachments && attachments.length > 0) {
+      msgData.attachments = attachments;
+    }
+
+    tx.set(msgRef, msgData);
     tx.update(convRef, patch);
   });
 }
@@ -214,4 +256,30 @@ export async function editMessage(
 
 export async function deleteMessage(convId: string, msgId: string): Promise<void> {
   await deleteDoc(doc(db!, "conversations", convId, "messages", msgId));
+}
+
+export async function toggleReaction(
+  convId: string,
+  msgId: string,
+  uid: string,
+  emoji: string,
+): Promise<void> {
+  const msgRef = doc(db!, "conversations", convId, "messages", msgId);
+
+  await runTransaction(db!, async (tx) => {
+    const snap = await tx.get(msgRef);
+    if (!snap.exists()) throw new Error("El mensaje ya no existe.");
+    const reactions = (snap.data()?.reactions ?? {}) as Record<string, string>;
+    const next = { ...reactions };
+    if (next[uid] === emoji) {
+      delete next[uid];
+    } else {
+      next[uid] = emoji;
+    }
+    const patch: Record<string, unknown> = { reactions: next };
+    if (Object.keys(next).length === 0) {
+      patch.reactions = deleteField();
+    }
+    tx.update(msgRef, patch);
+  });
 }

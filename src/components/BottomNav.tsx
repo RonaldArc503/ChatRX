@@ -63,11 +63,10 @@ export function BottomNav({ view, onNavigate }: BottomNavProps) {
   return (
     <nav
       class={
-        "fixed inset-x-0 bottom-0 z-40 bg-white/95 backdrop-blur " +
+        "fixed inset-x-0 bottom-0 z-40 bg-white/95 backdrop-blur dark:bg-slate-900/95 " +
         (view === "chat"
           ? "shadow-[0_-3px_12px_rgb(15_23_42/0.06)]"
-          : "border-t border-slate-200") +
-        " lg:sticky lg:inset-x-auto lg:bottom-auto lg:top-0 lg:border-b lg:border-t-0 lg:shadow-none"
+          : "border-t border-slate-200 dark:border-slate-800")
       }
       aria-label="Navegación principal"
     >
@@ -82,8 +81,8 @@ export function BottomNav({ view, onNavigate }: BottomNavProps) {
               class={
                 "group flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px] font-medium transition-colors lg:flex-row lg:justify-center lg:gap-2 lg:px-5 lg:py-4 lg:text-sm" +
                 (active
-                  ? " text-indigo-600"
-                  : " text-slate-500 hover:text-slate-700")
+                  ? " text-indigo-600 dark:text-indigo-400"
+                  : " text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200")
               }
               aria-current={active ? "page" : undefined}
               onClick={() => onNavigate(key)}
