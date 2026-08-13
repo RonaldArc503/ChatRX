@@ -12,12 +12,14 @@ import { importLocalTasks } from "../lib/tasks";
 import { setOffline, setOnline } from "../lib/presence";
 import { ensureProfile } from "../lib/profile";
 import { ensureSelfConversation } from "../lib/chat";
+import { stopAudio } from "../lib/audioPlayer";
 import { AuthView } from "./AuthView";
 import { BottomNav, type View } from "./BottomNav";
 import { ChatView } from "./ChatView";
 import { HomeView } from "./HomeView";
 import { ProfileView } from "./ProfileView";
 import { TodoApp } from "./TodoApp";
+import { AudioPlayerBar } from "./chat/AudioPlayerBar";
 
 export function AppRoot() {
   const [user, setUser] = useState<User | null | undefined>(undefined);
@@ -92,6 +94,7 @@ export function AppRoot() {
   }, [view]);
 
   async function handleLogout() {
+    stopAudio();
     await signOut();
   }
 
@@ -118,8 +121,9 @@ export function AppRoot() {
 
   return (
     <div class="min-h-screen dark:bg-slate-950">
+      <AudioPlayerBar />
       {notice ? (
-        <div class="fixed inset-x-0 top-4 z-50 mx-auto w-fit max-w-[calc(100vw-2rem)]">
+        <div class="fixed inset-x-0 top-[calc(var(--audio-bar-h)+1rem)] z-50 mx-auto w-fit max-w-[calc(100vw-2rem)]">
           <div class="flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 shadow-sm dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-5 w-5 flex-none">
               <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
@@ -136,7 +140,7 @@ export function AppRoot() {
         class={
           view === "chat"
             ? "w-full"
-            : "mx-auto w-full max-w-5xl px-4 pb-28 pt-6 sm:px-6 lg:pb-12 lg:pt-10"
+            : "mx-auto w-full max-w-5xl px-4 pb-28 pt-[calc(var(--audio-bar-h)+1.5rem)] sm:px-6 lg:pb-12 lg:pt-[calc(var(--audio-bar-h)+2.5rem)]"
         }
       >
         {view === "home" ? (

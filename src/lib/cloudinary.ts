@@ -1,4 +1,10 @@
-export type AttachmentKind = "image" | "video" | "pdf" | "doc" | "file";
+export type AttachmentKind =
+  | "image"
+  | "video"
+  | "pdf"
+  | "doc"
+  | "file"
+  | "audio";
 
 export interface CloudinaryUploadResult {
   resourceType: string;
@@ -13,7 +19,7 @@ export interface CloudinaryUploadResult {
 }
 
 export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
-export const MAX_ATTACHMENTS_PER_MESSAGE = 10;
+export const MAX_ATTACHMENTS_PER_MESSAGE = 30;
 
 const cloudName = import.meta.env.PUBLIC_CLOUDINARY_CLOUD_NAME || "lrpsglzl";
 const uploadPreset =
@@ -31,6 +37,18 @@ const VIDEO_TYPES = new Set([
   "video/webm",
   "video/quicktime",
 ]);
+const AUDIO_TYPES = new Set([
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/mp4",
+  "audio/aac",
+  "audio/ogg",
+  "audio/opus",
+  "audio/wav",
+  "audio/webm",
+  "audio/x-m4a",
+  "audio/flac",
+]);
 
 export function classificationFor(file: {
   name: string;
@@ -39,6 +57,8 @@ export function classificationFor(file: {
   const t = file.type.toLowerCase();
   if (IMAGE_TYPES.has(t)) return "image";
   if (VIDEO_TYPES.has(t)) return "video";
+  if (AUDIO_TYPES.has(t) || /\.(mp3|m4a|aac|ogg|opus|wav|flac)$/i.test(file.name))
+    return "audio";
   if (t === "application/pdf" || /\.pdf$/i.test(file.name)) return "pdf";
   if (t.includes("word") || /\.docx?$/i.test(file.name) || /officedocument\.wordprocessingml/i.test(t))
     return "doc";

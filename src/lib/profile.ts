@@ -11,6 +11,7 @@ import {
 } from "firebase/firestore";
 import type { User } from "firebase/auth";
 import { db } from "./firebase";
+import { syncProfileInConversations } from "./chat";
 
 export interface UserProfile {
   uid: string;
@@ -129,8 +130,24 @@ export async function updateProfile(
     }
   }
 
+  const finalName =
+    update.displayName !== undefined
+      ? String(update.displayName)
+      : current.displayName ?? "";
+  const finalPhone =
+    update.phone !== undefined ? String(update.phone) : current.phone ?? "";
+  const finalPhoto =
+    update.photoURL !== undefined
+      ? String(update.photoURL)
+      : current.photoURL ?? "";
+
   if (Object.keys(update).length > 0) {
     await setDoc(ref, update, { merge: true });
+    await syncProfileInConversations(uid, {
+      displayName: finalName,
+      photoURL: finalPhoto,
+      phone: finalPhone,
+    });
   }
 }
 

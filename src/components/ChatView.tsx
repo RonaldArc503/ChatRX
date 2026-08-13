@@ -2,6 +2,7 @@ import { useEffect, useState } from "preact/hooks";
 import type { User } from "firebase/auth";
 import {
   conversationId,
+  createGroup,
   ensureSelfConversation,
   getOrCreateConversation,
   subscribeConversations,
@@ -11,6 +12,7 @@ import { getProfile, type UserProfile } from "../lib/profile";
 import { subscribePresence, type Presence } from "../lib/presence";
 import { ConversationList, peerOf } from "./chat/ConversationList";
 import { ConversationWindow } from "./chat/ConversationWindow";
+import { GroupCreateFlow } from "./chat/GroupCreateFlow";
 import { NewChatSearch } from "./chat/NewChatSearch";
 
 interface ChatViewProps {
@@ -24,6 +26,7 @@ export function ChatView({ user, targetId, onConsumeTarget }: ChatViewProps) {
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showNewChat, setShowNewChat] = useState(false);
+  const [showNewGroup, setShowNewGroup] = useState(false);
   const [presence, setPresence] = useState<Record<string, Presence>>({});
 
   useEffect(() => {
@@ -82,6 +85,14 @@ export function ChatView({ user, targetId, onConsumeTarget }: ChatViewProps) {
     setSelectedId(id);
   }
 
+  async function handleCreateGroup(name: string, members: UserProfile[]) {
+    if (!me) return;
+    const id = await createGroup(me, name, members);
+    if (!id) return;
+    setShowNewGroup(false);
+    setSelectedId(id);
+  }
+
   if (!me) {
     return (
       <div class="flex min-h-60 items-center justify-center">
@@ -133,14 +144,20 @@ export function ChatView({ user, targetId, onConsumeTarget }: ChatViewProps) {
   };
 
   return (
-    <div class="fixed inset-x-0 top-0 z-30 flex h-[calc(100dvh-var(--nav-h))] min-h-0 flex-col overflow-hidden bg-white dark:bg-slate-900 lg:flex-row">
+    <div class="fixed inset-x-0 top-[var(--audio-bar-h)] z-[45] flex h-[calc(100dvh-var(--nav-h)-var(--audio-bar-h))] min-h-0 flex-col overflow-hidden bg-white dark:bg-slate-900 lg:flex-row">
       <aside
         class={
           "min-h-0 flex-col bg-white dark:bg-slate-900 lg:w-80 lg:max-w-xs lg:shrink-0 lg:border-r lg:border-slate-200 lg:dark:border-slate-800 " +
           (panelOpen ? "hidden lg:flex" : "flex")
         }
       >
-        {showNewChat ? (
+        {showNewGroup ? (
+          <GroupCreateFlow
+            me={me}
+            onPick={handleCreateGroup}
+            onCancel={() => setShowNewGroup(false)}
+          />
+        ) : showNewChat ? (
           <NewChatSearch
             me={me}
             onPick={handlePick}
@@ -150,17 +167,29 @@ export function ChatView({ user, targetId, onConsumeTarget }: ChatViewProps) {
           <>
             <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
               <h2 class="text-lg font-bold text-slate-900 dark:text-white">Mensajes</h2>
-              <button
-                type="button"
-                aria-label="Nueva conversación"
-                onClick={() => setShowNewChat(true)}
-                class="grid h-9 w-9 place-items-center rounded-full bg-indigo-600 text-white shadow-sm transition-colors hover:bg-indigo-700"
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-5 w-5">
-                  <path d="M12 20h9" />
-                  <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
-                </svg>
-              </button>
+              <div class="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  aria-label="Nuevo grupo"
+                  onClick={() => setShowNewGroup(true)}
+                  class="grid h-9 w-9 place-items-center rounded-full bg-transparent text-slate-600 transition-colors hover:bg-indigo-50 hover:text-indigo-600 dark:text-slate-300 dark:hover:bg-indigo-500/15 dark:hover:text-indigo-400"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-5 w-5">
+                    <path d="M12 20h9" />
+                    <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  aria-label="Nueva conversación"
+                  onClick={() => setShowNewChat(true)}
+                  class="grid h-9 w-9 place-items-center rounded-full bg-indigo-600 text-white shadow-sm transition-colors hover:bg-indigo-700"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-5 w-5">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                  </svg>
+                </button>
+              </div>
             </div>
             <ConversationList
               conversations={listConversations}
@@ -186,6 +215,7 @@ export function ChatView({ user, targetId, onConsumeTarget }: ChatViewProps) {
             me={me}
             conv={selectedConv}
             peerPresence={peerPresence}
+            conversations={listConversations}
             onBack={() => setSelectedId(null)}
           />
         ) : (

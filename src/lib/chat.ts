@@ -1,9 +1,13 @@
 import {
+  arrayRemove,
+  arrayUnion,
   collection,
   deleteDoc,
   deleteField,
   doc,
   getDoc,
+  getDocs,
+  limit,
   onSnapshot,
   orderBy,
   query,
@@ -11,6 +15,7 @@ import {
   setDoc,
   updateDoc,
   where,
+  writeBatch,
   type Unsubscribe,
 } from "firebase/firestore";
 import { db } from "./firebase";
@@ -30,6 +35,8 @@ export interface ChatConversation {
   lastMessage: string;
   lastMessageAt: number;
   createdAt: number;
+  kind?: "dm" | "group";
+  name?: string;
   pinnedMessages?: PinnedMessage[];
 }
 
@@ -39,12 +46,17 @@ export interface ReplyInfo {
   senderId: string;
 }
 
+export interface ForwardedFrom {
+  uid: string;
+  name: string;
+}
+
 export interface PinnedMessage extends ReplyInfo {
   pinnedAt: number;
 }
 
 export interface ChatAttachment {
-  kind: "image" | "video" | "pdf" | "doc" | "file";
+  kind: "image" | "video" | "pdf" | "doc" | "file" | "audio";
   resourceType: string;
   url: string;
   publicId: string;
@@ -67,10 +79,16 @@ export interface ChatMessage {
   replyTo?: ReplyInfo | null;
   reactions?: Record<string, string>;
   attachments?: ChatAttachment[];
+  mentions?: string[];
+  forwardedFrom?: ForwardedFrom | null;
 }
 
 export function conversationId(uidA: string, uidB: string): string {
   return [uidA, uidB].sort().join("__");
+}
+
+export function isGroupConversation(conv: Pick<ChatConversation, "kind" | "name">): boolean {
+  return conv.kind === "group" || conv.name !== undefined;
 }
 
 function memberSnapshot(p: UserProfile): MemberSnapshot {
@@ -79,6 +97,97 @@ function memberSnapshot(p: UserProfile): MemberSnapshot {
     photoURL: p.photoURL,
     phone: p.phone,
   };
+}
+
+export async function createGroup(
+  me: UserProfile,
+  name: string,
+  memberProfiles: UserProfile[],
+): Promise<string | null> {
+  const clean = name.trim();
+  if (!clean || memberProfiles.length === 0) return null;
+
+  const members: Record<string, MemberSnapshot> = {
+    [me.uid]: memberSnapshot(me),
+  };
+  for (const p of memberProfiles) {
+    if (p.uid !== me.uid) members[p.uid] = memberSnapshot(p);
+  }
+  const participantIds = Object.keys(members);
+
+  const ref = doc(collection(db!, "conversations"));
+  const now = Date.now();
+  await setDoc(ref, {
+    participantIds,
+    members,
+    unread: Object.fromEntries(participantIds.map((uid) => [uid, 0])),
+    lastMessage: "",
+    lastMessageAt: 0,
+    createdAt: now,
+    kind: "group",
+    name: clean,
+  });
+  return ref.id;
+}
+
+export async function addGroupMembers(
+  convId: string,
+  profiles: UserProfile[],
+): Promise<void> {
+  const ref = doc(db!, "conversations", convId);
+  const members: Record<string, MemberSnapshot> = {};
+  for (const p of profiles) members[p.uid] = memberSnapshot(p);
+  const uids = Object.keys(members);
+  const snap = await getDoc(ref);
+  const current = (snap.exists() ? snap.data() : {}) as {
+    unread?: Record<string, number>;
+  };
+  const unreadPatch: Record<string, number> = {};
+  for (const uid of uids) unreadPatch[`unread.${uid}`] = current.unread?.[uid] ?? 0;
+
+  await updateDoc(ref, {
+    participantIds: arrayUnion(...uids),
+    members,
+    ...unreadPatch,
+  });
+}
+
+export async function removeGroupMember(
+  convId: string,
+  uid: string,
+): Promise<void> {
+  const ref = doc(db!, "conversations", convId);
+  await updateDoc(ref, {
+    participantIds: arrayRemove(uid),
+    [`members.${uid}`]: deleteField(),
+  });
+}
+
+export async function renameGroup(convId: string, name: string): Promise<void> {
+  const clean = name.trim();
+  if (!clean) return;
+  await updateDoc(doc(db!, "conversations", convId), { name: clean });
+}
+
+export async function syncProfileInConversations(
+  uid: string,
+  snapshot: MemberSnapshot,
+): Promise<void> {
+  const q = query(
+    collection(db!, "conversations"),
+    where("participantIds", "array-contains", uid),
+  );
+  const snap = await getDocs(q);
+  if (snap.empty) return;
+  const batch = writeBatch(db!);
+  snap.forEach((d) => {
+    batch.update(d.ref, { [`members.${uid}`]: snapshot });
+  });
+  await batch.commit();
+}
+
+export async function leaveGroup(convId: string, uid: string): Promise<void> {
+  await removeGroupMember(convId, uid);
 }
 
 export async function getOrCreateConversation(
@@ -171,6 +280,8 @@ export async function sendMessage(
   text: string,
   replyTo?: ReplyInfo | null,
   attachments?: ChatAttachment[],
+  mentions?: string[],
+  forwardedFrom?: ForwardedFrom | null,
 ): Promise<void> {
   const clean = text.trim();
   if (!clean && (!attachments || attachments.length === 0)) return;
@@ -186,7 +297,7 @@ export async function sendMessage(
     if (!data.participantIds.includes(senderId)) {
       throw new Error("No puedes enviar mensajes en esta conversación.");
     }
-    const otherId = data.participantIds.find((id) => id !== senderId);
+    const otherIds = data.participantIds.filter((id) => id !== senderId);
     const msgRef = doc(collection(convRef, "messages"));
     const now = Date.now();
     const preview =
@@ -200,8 +311,10 @@ export async function sendMessage(
       lastMessageAt: now,
       [`unread.${senderId}`]: 0,
     };
-    if (otherId) {
-      patch[`unread.${otherId}`] = (data.unread?.[otherId] ?? 0) + 1;
+    const mentioned = mentions ?? [];
+    for (const id of otherIds) {
+      patch[`unread.${id}`] =
+        (data.unread?.[id] ?? 0) + (mentioned.includes(id) ? 2 : 1);
     }
 
     const msgData: Record<string, unknown> = {
@@ -212,6 +325,12 @@ export async function sendMessage(
     if (replyTo) msgData.replyTo = replyTo;
     if (attachments && attachments.length > 0) {
       msgData.attachments = attachments;
+    }
+    if (mentioned.length > 0) {
+      msgData.mentions = mentioned;
+    }
+    if (forwardedFrom) {
+      msgData.forwardedFrom = forwardedFrom;
     }
 
     tx.set(msgRef, msgData);
@@ -298,7 +417,40 @@ export async function editMessage(
 }
 
 export async function deleteMessage(convId: string, msgId: string): Promise<void> {
-  await deleteDoc(doc(db!, "conversations", convId, "messages", msgId));
+  const msgRef = doc(db!, "conversations", convId, "messages", msgId);
+  const target = await getDoc(msgRef);
+  if (!target.exists()) return;
+  await deleteDoc(msgRef);
+
+  const latest = await getDocs(
+    query(
+      collection(db!, "conversations", convId, "messages"),
+      orderBy("createdAt", "desc"),
+      limit(1),
+    ),
+  );
+  const convRef = doc(db!, "conversations", convId);
+  if (latest.empty) {
+    await updateDoc(convRef, { lastMessage: "", lastMessageAt: 0 });
+    return;
+  }
+  const m = latest.docs[0].data() as {
+    text?: string;
+    createdAt: number;
+    attachments?: ChatAttachment[];
+  };
+  const preview =
+    (!m.text || m.text.trim().length === 0) &&
+    m.attachments &&
+    m.attachments.length > 0
+      ? `📎 ${m.attachments[0].name}${
+          m.attachments.length > 1 ? ` (+${m.attachments.length - 1})` : ""
+        }`
+      : m.text ?? "";
+  await updateDoc(convRef, {
+    lastMessage: preview,
+    lastMessageAt: m.createdAt,
+  });
 }
 
 export async function toggleReaction(

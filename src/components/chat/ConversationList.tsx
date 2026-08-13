@@ -1,6 +1,7 @@
 import type { ChatConversation } from "../../lib/chat";
 import type { Presence } from "../../lib/presence";
 import { Avatar } from "./Avatar";
+import { AvatarStack } from "./AvatarStack";
 import { formatTime } from "./time";
 
 interface ConversationListProps {
@@ -11,10 +12,30 @@ interface ConversationListProps {
   presence?: Record<string, Presence>;
 }
 
+export interface ChatPeer {
+  uid: string;
+  name: string;
+  photoURL: string;
+  phone: string;
+  isSelf: boolean;
+  isGroup: boolean;
+}
+
 export function peerOf(
   conv: ChatConversation,
   uid: string,
-): { uid: string; name: string; photoURL: string; phone: string; isSelf: boolean } {
+): ChatPeer {
+  const isGroup = conv.kind === "group";
+  if (isGroup) {
+    return {
+      uid: conv.id,
+      name: conv.name || "Grupo",
+      photoURL: "",
+      phone: "",
+      isSelf: false,
+      isGroup: true,
+    };
+  }
   const otherId = conv.participantIds.find((id) => id !== uid);
   if (!otherId) {
     const id = conv.participantIds[0] ?? "";
@@ -25,6 +46,7 @@ export function peerOf(
       photoURL: ownMember?.photoURL || "",
       phone: "",
       isSelf: true,
+      isGroup: false,
     };
   }
   const member = conv.members[otherId];
@@ -34,6 +56,7 @@ export function peerOf(
     photoURL: member?.photoURL || "",
     phone: member?.phone || "",
     isSelf: false,
+    isGroup: false,
   };
 }
 
@@ -70,7 +93,21 @@ export function ConversationList({
         const peer = peerOf(conv, uid);
         const unread = conv.unread?.[uid] ?? 0;
         const active = conv.id === selectedId;
-        const online = presence?.[peer.uid]?.online ?? false;
+        const memberList = Object.entries(conv.members ?? {}).map(([mUid, m]) => ({
+          uid: mUid,
+          displayName: m.displayName,
+          photoURL: m.photoURL,
+        }));
+        const online = peer.isGroup
+          ? false
+          : presence?.[peer.uid]?.online ?? false;
+        const subtitle = peer.isSelf
+          ? "Escríbete a ti mismo. Guarda notas y enlaces."
+          : conv.lastMessageAt
+            ? conv.lastMessage
+            : peer.isGroup
+              ? "Grupo creado"
+              : "Nuevo chat";
         return (
           <li key={conv.id}>
             <button
@@ -84,13 +121,21 @@ export function ConversationList({
               onClick={() => onSelect(conv.id)}
             >
               <span class="relative flex-none">
-                <Avatar uid={peer.uid} name={peer.name} photoURL={peer.photoURL} size="sm" />
-                {online && !peer.isSelf ? (
-                  <span
-                    class="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white bg-emerald-500 dark:border-slate-900"
-                    aria-label="En línea"
-                  />
-                ) : null}
+                {peer.isGroup ? (
+                  <span class="block p-0.5">
+                    <AvatarStack members={memberList} />
+                  </span>
+                ) : (
+                  <>
+                    <Avatar uid={peer.uid} name={peer.name} photoURL={peer.photoURL} size="sm" />
+                    {online && !peer.isSelf ? (
+                      <span
+                        class="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white bg-emerald-500 dark:border-slate-900"
+                        aria-label="En línea"
+                      />
+                    ) : null}
+                  </>
+                )}
               </span>
               <span class="min-w-0 flex-1">
                 <span class="flex items-baseline justify-between gap-2">
@@ -110,11 +155,12 @@ export function ConversationList({
                         : "text-slate-500 dark:text-slate-400")
                     }
                   >
-                    {peer.isSelf
-                      ? "Escríbete a ti mismo. Guarda notas y enlaces."
-                      : conv.lastMessageAt
-                        ? conv.lastMessage
-                        : "Nuevo chat"}
+                    {peer.isGroup ? (
+                      <span class="mr-1">
+                        {conv.members ? `${Object.keys(conv.members).length} miembros · ` : ""}
+                      </span>
+                    ) : null}
+                    {subtitle}
                   </span>
                   {unread > 0 ? (
                     <span class="grid h-5 min-w-5 flex-none place-items-center rounded-full bg-indigo-600 px-1.5 text-[11px] font-bold text-white">

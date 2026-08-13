@@ -9,12 +9,31 @@ const PALETTE = [
   "bg-fuchsia-500",
 ];
 
+const TEXT_PALETTE = [
+  "text-indigo-500",
+  "text-sky-500",
+  "text-emerald-500",
+  "text-amber-500",
+  "text-rose-500",
+  "text-violet-500",
+  "text-teal-500",
+  "text-fuchsia-500",
+];
+
 export function avatarColor(uid: string): string {
   let h = 0;
   for (let i = 0; i < uid.length; i++) {
     h = (h * 31 + uid.charCodeAt(i)) >>> 0;
   }
   return PALETTE[h % PALETTE.length];
+}
+
+export function authorTextColor(uid: string): string {
+  let h = 0;
+  for (let i = 0; i < uid.length; i++) {
+    h = (h * 31 + uid.charCodeAt(i)) >>> 0;
+  }
+  return TEXT_PALETTE[h % TEXT_PALETTE.length];
 }
 
 function initials(name: string): string {

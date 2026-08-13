@@ -5,6 +5,7 @@
 :root {
   color-scheme: light;
   --nav-h: calc(4.25rem + env(safe-area-inset-bottom));
+  --audio-bar-h: 0px;
 }
 
 @media (min-width: 1024px) {
@@ -22,6 +23,8 @@
   --animate-toast-in: toast-in 0.2s ease;
   --animate-sheet-in: sheet-in 0.18s ease;
   --animate-msg-highlight: msg-highlight 2.5s ease;
+  --animate-drop-bounce: drop-bounce 0.4s ease;
+  --animate-typing-dot: typing-dot 1.2s ease-in-out infinite;
 
   @keyframes pulse-ring {
     0%,
@@ -63,6 +66,66 @@
       box-shadow: 0 0 0 3px rgb(99 102 241 / 0);
     }
   }
+
+  @keyframes drop-bounce {
+    0% {
+      opacity: 0;
+      transform: translateY(-10px) scale(0.9);
+    }
+    60% {
+      transform: translateY(2px) scale(1.03);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @keyframes typing-dot {
+    0%,
+    60%,
+    100% {
+      opacity: 0.35;
+      transform: translateY(0);
+    }
+    30% {
+      opacity: 1;
+      transform: translateY(-3px);
+    }
+  }
+
+  @keyframes equalizer {
+    0%,
+    100% {
+      height: 4px;
+    }
+    50% {
+      height: 14px;
+    }
+  }
+}
+
+.drop-zone-bounce {
+  animation: drop-bounce 0.4s ease;
+}
+
+.chat-bg {
+  background-color: #f8fafc;
+  background-image: radial-gradient(rgb(99 102 241 / 0.08) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+
+.dark .chat-bg {
+  background-color: #0f172a;
+  background-image: radial-gradient(rgb(148 163 184 / 0.09) 1px, transparent 1px);
+}
+
+.typing-dot {
+  animation: typing-dot 1.2s ease-in-out infinite;
+}
+
+.eq-bar {
+  animation: equalizer 0.9s ease-in-out infinite;
 }
 
 .msg-highlight {

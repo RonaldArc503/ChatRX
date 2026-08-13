@@ -12,6 +12,7 @@ interface MessageActionsSheetProps {
   onReply: (msg: ChatMessage) => void;
   onReact: (msg: ChatMessage, emoji: string) => void;
   onPin: (msg: ChatMessage) => void;
+  onForward: (msg: ChatMessage) => void;
 }
 
 const REACT_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
@@ -58,6 +59,14 @@ const DOWNLOAD_ICON = (
   </svg>
 );
 
+const FORWARD_ICON = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-5 w-5">
+    <path d="m4 12 10-8" />
+    <path d="m14 4 6 8-6 8Z" />
+    <path d="M4 12h16" />
+  </svg>
+);
+
 const PIN_ICON = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-5 w-5">
     <path d="M12 17v5" />
@@ -93,6 +102,7 @@ export function MessageActionsSheet({
   onReply,
   onReact,
   onPin,
+  onForward,
 }: MessageActionsSheetProps) {
   const [copied, setCopied] = useState(false);
 
@@ -128,7 +138,7 @@ export function MessageActionsSheet({
         onClick={onClose}
       />
       <div class="absolute inset-x-0 bottom-0 flex justify-center">
-        <div class="animate-sheet-in w-full max-w-md rounded-t-2xl bg-white p-2 pb-4 shadow-2xl dark:bg-slate-900">
+        <div class="animate-sheet-in max-h-[calc(100dvh-var(--nav-h)-var(--audio-bar-h)-0.5rem)] w-full max-w-md overflow-y-auto rounded-t-2xl bg-white p-2 pb-4 shadow-2xl dark:bg-slate-900">
           <div class="flex items-center justify-center gap-1 border-b border-slate-100 px-2 pb-3 pt-1 dark:border-slate-800">
             {REACT_EMOJIS.map((emoji) => (
               <button
@@ -163,6 +173,17 @@ export function MessageActionsSheet({
               {REPLY_ICON}
             </span>
             Responder
+          </button>
+
+          <button
+            type="button"
+            class="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
+            onClick={() => onForward(msg)}
+          >
+            <span class="grid h-9 w-9 flex-none place-items-center rounded-full bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-400">
+              {FORWARD_ICON}
+            </span>
+            Reenviar
           </button>
 
           <button
