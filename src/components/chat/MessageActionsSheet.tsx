@@ -13,6 +13,7 @@ interface MessageActionsSheetProps {
   onReact: (msg: ChatMessage, emoji: string) => void;
   onPin: (msg: ChatMessage) => void;
   onForward: (msg: ChatMessage) => void;
+  onSave: (msg: ChatMessage) => void;
 }
 
 const REACT_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
@@ -67,6 +68,14 @@ const FORWARD_ICON = (
   </svg>
 );
 
+const SAVE_ICON = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-5 w-5">
+    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+    <path d="M17 21v-8H7v8" />
+    <path d="M7 3v5h8" />
+  </svg>
+);
+
 const PIN_ICON = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-5 w-5">
     <path d="M12 17v5" />
@@ -91,6 +100,36 @@ async function downloadAttachment(url: string, name: string): Promise<void> {
   }
 }
 
+function loadImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("No se pudo cargar la imagen."));
+    img.src = url;
+  });
+}
+
+async function copyImageToClipboard(url: string): Promise<void> {
+  const img = await loadImage(url);
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("No se pudo copiar la imagen.");
+  ctx.drawImage(img, 0, 0);
+  const blob = await new Promise<Blob | null>((res) =>
+    canvas.toBlob(res, "image/png"),
+  );
+  if (!blob) throw new Error("No se pudo copiar la imagen.");
+  if (!navigator.clipboard || !("write" in navigator.clipboard)) {
+    throw new Error("No se pudo copiar la imagen.");
+  }
+  await navigator.clipboard.write([
+    new ClipboardItem({ "image/png": blob }),
+  ]);
+}
+
 export function MessageActionsSheet({
   msg,
   mine,
@@ -103,26 +142,42 @@ export function MessageActionsSheet({
   onReact,
   onPin,
   onForward,
+  onSave,
 }: MessageActionsSheetProps) {
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
 
   if (!msg) return null;
 
   const myReaction = uid ? msg.reactions?.[uid] : undefined;
   const attachments = msg.attachments ?? [];
+  const hasText = msg.text.trim().length > 0;
+  const imageAttachments = attachments.filter((a) => a.kind === "image");
+  const canCopy = hasText || imageAttachments.length > 0;
 
   async function handleCopy() {
-    try {
-      await navigator.clipboard.writeText(msg!.text);
-    } catch {
-      const ta = document.createElement("textarea");
-      ta.value = msg!.text;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
+    const image = imageAttachments[0];
+    if (image) {
+      try {
+        await copyImageToClipboard(image.url);
+      } catch {
+        setCopyFailed(true);
+        window.setTimeout(() => setCopyFailed(false), 1800);
+        return;
+      }
+    } else {
+      try {
+        await navigator.clipboard.writeText(msg!.text);
+      } catch {
+        const ta = document.createElement("textarea");
+        ta.value = msg!.text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+      }
     }
     setCopied(true);
     window.setTimeout(() => {
@@ -189,6 +244,17 @@ export function MessageActionsSheet({
           <button
             type="button"
             class="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
+            onClick={() => onSave(msg)}
+          >
+            <span class="grid h-9 w-9 flex-none place-items-center rounded-full bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400">
+              {SAVE_ICON}
+            </span>
+            Guardar en Mis guardados
+          </button>
+
+          <button
+            type="button"
+            class="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
             onClick={() => onPin(msg)}
           >
             <span
@@ -204,23 +270,33 @@ export function MessageActionsSheet({
             {isPinned ? "Desfijar mensaje" : "Fijar mensaje"}
           </button>
 
-          <button
-            type="button"
-            class="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
-            onClick={handleCopy}
-          >
-            <span
-              class={
-                "grid h-9 w-9 flex-none place-items-center rounded-full " +
-                (copied
-                  ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400"
-                  : "bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-400")
-              }
+          {canCopy ? (
+            <button
+              type="button"
+              class="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
+              onClick={handleCopy}
             >
-              {copied ? CHECK_ICON : COPY_ICON}
-            </span>
-            {copied ? "Copiado" : "Copiar Mensaje"}
-          </button>
+              <span
+                class={
+                  "grid h-9 w-9 flex-none place-items-center rounded-full " +
+                  (copyFailed
+                    ? "bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-400"
+                    : copied
+                      ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400"
+                      : "bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-400")
+                }
+              >
+                {copied ? CHECK_ICON : COPY_ICON}
+              </span>
+              {copyFailed
+                ? "No se pudo copiar"
+                : copied
+                  ? "Copiado"
+                  : imageAttachments.length > 0
+                    ? "Copiar imagen"
+                    : "Copiar mensaje"}
+            </button>
+          ) : null}
 
           {attachments.length > 0 ? (
             <button
@@ -238,7 +314,7 @@ export function MessageActionsSheet({
             </button>
           ) : null}
 
-          {mine ? (
+          {mine && hasText ? (
             <button
               type="button"
               class="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"

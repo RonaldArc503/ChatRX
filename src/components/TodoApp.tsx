@@ -197,7 +197,6 @@ export function TodoApp({ uid }: TodoAppProps) {
             key={status}
             status={status}
             count={byStatus[status].length}
-            onDrop={moveTodo}
             onClear={status === "done" ? clearCompleted : undefined}
             active={tab === status}
           >

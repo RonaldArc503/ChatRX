@@ -16,7 +16,7 @@ export function NewChatSearch({ me, onPick, onCancel }: NewChatSearchProps) {
 
   useEffect(() => {
     const term = query.trim();
-    if (term.length < 2) {
+    if (term.length < 4) {
       setResults([]);
       setSelfOnly(false);
       setBusy(false);
@@ -102,7 +102,7 @@ export function NewChatSearch({ me, onPick, onCancel }: NewChatSearchProps) {
           </ul>
         ) : (
           <p class="px-4 py-6 text-center text-sm text-slate-400 dark:text-slate-500">
-            Escribe un número de teléfono (8 dígitos) o un correo completo.
+            Escribe al menos 4 dígitos del teléfono o un correo completo.
           </p>
         )}
       </div>

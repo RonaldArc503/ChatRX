@@ -26,16 +26,22 @@ export function subscribeTyping(
   convId: string,
   cb: (users: Record<string, number>) => void,
 ): Unsubscribe {
-  return onSnapshot(typingRef(convId), (snap) => {
-    if (!snap.exists()) {
-      cb({});
-      return;
-    }
-    const data = snap.data() as Record<string, unknown>;
-    const out: Record<string, number> = {};
-    for (const [key, value] of Object.entries(data)) {
-      if (typeof value === "number") out[key] = value;
-    }
-    cb(out);
-  });
+  return onSnapshot(
+    typingRef(convId),
+    (snap) => {
+      if (!snap.exists()) {
+        cb({});
+        return;
+      }
+      const data = snap.data() as Record<string, unknown>;
+      const out: Record<string, number> = {};
+      for (const [key, value] of Object.entries(data)) {
+        if (typeof value === "number") out[key] = value;
+      }
+      cb(out);
+    },
+    (error) => {
+      console.error("Error al escuchar el estado de escritura:", error);
+    },
+  );
 }

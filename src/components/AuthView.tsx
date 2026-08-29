@@ -1,6 +1,7 @@
 import { useState } from "preact/hooks";
+import type { User } from "firebase/auth";
 import { authErrorMessage, login, loginWithGoogle, register } from "../lib/auth";
-import { ensureProfile, normalizePhone, searchProfiles } from "../lib/profile";
+import { ensureProfile, normalizePhone } from "../lib/profile";
 
 const GOOGLE_ICON = (
   <svg class="h-5 w-5" viewBox="0 0 48 48" aria-hidden="true">
@@ -31,6 +32,8 @@ export function AuthView() {
   const [phone, setPhone] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   async function handleSubmit(e: SubmitEvent) {
     e.preventDefault();
@@ -49,24 +52,25 @@ export function AuthView() {
         setError("El número de teléfono debe tener 8 dígitos (El Salvador).");
         return;
       }
-      const taken = await searchProfiles(normalizedPhone);
-      if (taken.some((p) => p.phone === normalizedPhone)) {
-        setError("Ese número de teléfono ya está registrado.");
-        return;
-      }
     }
     setBusy(true);
+    let created = false;
+    let user: User | null = null;
     try {
       if (mode === "login") {
         await login(email, password);
       } else {
-        const user = await register(email, password);
+        user = await register(email, password);
+        created = true;
         await ensureProfile(user, {
           phone: normalizePhone(phone),
           displayName: user.email?.split("@")[0] ?? "Usuario",
         });
       }
     } catch (err) {
+      if (created && user) {
+        await user.delete().catch(() => {});
+      }
       setError(
         err instanceof Error && /teléfono ya está registrado/i.test(err.message)
           ? err.message
@@ -153,34 +157,54 @@ export function AuthView() {
 
             <label class="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
               Contraseña
-              <input
-                class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base shadow-sm placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
-                type="password"
-                required
-                value={password}
-                placeholder="••••••••"
-                autocomplete={mode === "login" ? "current-password" : "new-password"}
-                onInput={(event) =>
-                  setPassword((event.target as HTMLInputElement).value)
-                }
-              />
+              <span class="relative">
+                <input
+                  class="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 pr-11 text-base shadow-sm placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
+                  type={showPassword ? "text" : "password"}
+                  required
+                  value={password}
+                  placeholder="••••••••"
+                  autocomplete={mode === "login" ? "current-password" : "new-password"}
+                  onInput={(event) =>
+                    setPassword((event.target as HTMLInputElement).value)
+                  }
+                />
+                <button
+                  type="button"
+                  aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                  onClick={() => setShowPassword((v) => !v)}
+                  class="absolute inset-y-0 right-0 grid w-11 place-items-center text-slate-400 transition-colors hover:text-slate-600 dark:hover:text-slate-300"
+                >
+                  {showPassword ? <EyeOffIcon /> : <EyeIcon />}
+                </button>
+              </span>
             </label>
 
             {mode === "register" ? (
               <>
                 <label class="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
                   Confirmar contraseña
-                  <input
-                    class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base shadow-sm placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
-                    type="password"
-                    required
-                    value={confirm}
-                    placeholder="••••••••"
-                    autocomplete="new-password"
-                    onInput={(event) =>
-                      setConfirm((event.target as HTMLInputElement).value)
-                    }
-                  />
+                  <span class="relative">
+                    <input
+                      class="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 pr-11 text-base shadow-sm placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
+                      type={showConfirm ? "text" : "password"}
+                      required
+                      value={confirm}
+                      placeholder="••••••••"
+                      autocomplete="new-password"
+                      onInput={(event) =>
+                        setConfirm((event.target as HTMLInputElement).value)
+                      }
+                    />
+                    <button
+                      type="button"
+                      aria-label={showConfirm ? "Ocultar contraseña" : "Mostrar contraseña"}
+                      onClick={() => setShowConfirm((v) => !v)}
+                      class="absolute inset-y-0 right-0 grid w-11 place-items-center text-slate-400 transition-colors hover:text-slate-600 dark:hover:text-slate-300"
+                    >
+                      {showConfirm ? <EyeOffIcon /> : <EyeIcon />}
+                    </button>
+                  </span>
                 </label>
 
                 <label class="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
@@ -243,5 +267,25 @@ function Spinner() {
       class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
       aria-hidden="true"
     />
+  );
+}
+
+function EyeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-5 w-5" aria-hidden="true">
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function EyeOffIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-5 w-5" aria-hidden="true">
+      <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c6.5 0 10 8 10 8a13.16 13.16 0 0 1-1.67 2.68" />
+      <path d="M6.61 6.61A13.5 13.5 0 0 0 2 12s3.5 8 10 8a9.74 9.74 0 0 0 5.39-1.61" />
+      <path d="M2 2l20 20" />
+      <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
+    </svg>
   );
 }

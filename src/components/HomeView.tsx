@@ -6,6 +6,7 @@ import {
   type ChatConversation,
 } from "../lib/chat";
 import { subscribeTasks } from "../lib/tasks";
+import { isOnlineNow, subscribePresence, type Presence } from "../lib/presence";
 import type { Todo } from "../lib/todo";
 import { Avatar } from "./chat/Avatar";
 import { peerOf } from "./chat/ConversationList";
@@ -49,6 +50,7 @@ export function HomeView({
 }: HomeViewProps) {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
+  const [presence, setPresence] = useState<Record<string, Presence>>({});
 
   useEffect(() => {
     return subscribeTasks(user.uid, setTodos);
@@ -57,6 +59,30 @@ export function HomeView({
   useEffect(() => {
     return subscribeConversations(user.uid, setConversations);
   }, [user.uid]);
+
+  const peerKey = conversations
+    .flatMap((c) => c.participantIds.filter((id) => id !== user.uid))
+    .sort()
+    .join(",");
+
+  useEffect(() => {
+    const peers = new Set(
+      conversations.flatMap((c) =>
+        c.participantIds.filter((id) => id !== user.uid),
+      ),
+    );
+    const subs = [...peers].map((pid) =>
+      subscribePresence(pid, (p) => {
+        setPresence((prev) => ({
+          ...prev,
+          [pid]: p ?? { online: false, lastSeen: 0 },
+        }));
+      }),
+    );
+    return () => {
+      subs.forEach((unsub) => unsub());
+    };
+  }, [peerKey, user.uid]);
 
   const pending = useMemo(() => {
     const pendingTodos = todos.filter((t) => t.status !== "done");
@@ -136,12 +162,22 @@ export function HomeView({
                       onClick={() => onOpenConversation(conv.id)}
                       class="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/60"
                     >
-                      <Avatar
-                        uid={peer.uid}
-                        name={peer.name}
-                        photoURL={peer.photoURL}
-                        size="md"
-                      />
+                      <span class="relative flex-none">
+                        <Avatar
+                          uid={peer.uid}
+                          name={peer.name}
+                          photoURL={peer.photoURL}
+                          size="md"
+                        />
+                        {!peer.isGroup &&
+                        !peer.isSelf &&
+                        isOnlineNow(presence[peer.uid]) ? (
+                          <span
+                            class="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white bg-emerald-500 dark:border-slate-900"
+                            aria-label="En línea"
+                          />
+                        ) : null}
+                      </span>
                       <span class="min-w-0 flex-1">
                         <span class="flex items-baseline justify-between gap-2">
                           <span class="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">

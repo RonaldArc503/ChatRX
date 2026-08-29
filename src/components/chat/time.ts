@@ -34,3 +34,19 @@ export function formatTime(ts: number): string {
   if (!ts) return "";
   return TIME_FMT.format(ts);
 }
+
+export function formatLastSeen(ts: number): string {
+  if (!ts) return "Sin conexión";
+  const diff = Math.round((Date.now() - ts) / 86_400_000);
+  if (sameDay(ts, Date.now())) {
+    return `última vez hoy a las ${formatTime(ts)}`;
+  }
+  if (diff === 1) {
+    return `última vez ayer a las ${formatTime(ts)}`;
+  }
+  const year = new Date(ts).getFullYear();
+  if (year === new Date().getFullYear()) {
+    return `última vez el ${DATE_FMT.format(ts)} a las ${formatTime(ts)}`;
+  }
+  return `última vez el ${LONG_FMT.format(ts)}`;
+}

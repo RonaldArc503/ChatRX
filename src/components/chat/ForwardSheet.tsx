@@ -6,8 +6,7 @@ import {
   type ForwardedFrom,
 } from "../../lib/chat";
 import type { UserProfile } from "../../lib/profile";
-import { Avatar } from "./Avatar";
-import { AvatarStack } from "./AvatarStack";
+import { Avatar, GroupAvatar } from "./Avatar";
 import { peerOf } from "./ConversationList";
 import { extractMentions } from "./mention";
 
@@ -111,11 +110,6 @@ export function ForwardSheet({
             ) : (
               targets.map((conv) => {
                 const peer = peerOf(conv, me.uid);
-                const memberList = Object.entries(conv.members ?? {}).map(([mUid, m]) => ({
-                  uid: mUid,
-                  displayName: m.displayName,
-                  photoURL: m.photoURL,
-                }));
                 const isSelected = selected.has(conv.id);
                 return (
                   <li key={conv.id}>
@@ -129,7 +123,7 @@ export function ForwardSheet({
                     >
                       <span class="flex-none">
                         {peer.isGroup ? (
-                          <AvatarStack members={memberList} size="sm" />
+                          <GroupAvatar name={peer.name} size="sm" />
                         ) : (
                           <Avatar uid={peer.uid} name={peer.name} photoURL={peer.photoURL} size="sm" />
                         )}

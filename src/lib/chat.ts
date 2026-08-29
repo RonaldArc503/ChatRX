@@ -81,6 +81,7 @@ export interface ChatMessage {
   attachments?: ChatAttachment[];
   mentions?: string[];
   forwardedFrom?: ForwardedFrom | null;
+  pending?: boolean;
 }
 
 export function conversationId(uidA: string, uidB: string): string {
@@ -242,19 +243,25 @@ export function subscribeConversations(
     collection(db!, "conversations"),
     where("participantIds", "array-contains", uid),
   );
-  return onSnapshot(q, (snap) => {
-    const list: ChatConversation[] = [];
-    snap.forEach((d) =>
-      list.push({ id: d.id, ...(d.data() as Omit<ChatConversation, "id">) }),
-    );
-    list.sort((a, b) => {
-      const aSelf = a.participantIds.length === 1 ? 1 : 0;
-      const bSelf = b.participantIds.length === 1 ? 1 : 0;
-      if (aSelf !== bSelf) return bSelf - aSelf;
-      return b.lastMessageAt - a.lastMessageAt;
-    });
-    cb(list);
-  });
+  return onSnapshot(
+    q,
+    (snap) => {
+      const list: ChatConversation[] = [];
+      snap.forEach((d) =>
+        list.push({ id: d.id, ...(d.data() as Omit<ChatConversation, "id">) }),
+      );
+      list.sort((a, b) => {
+        const aSelf = a.participantIds.length === 1 ? 1 : 0;
+        const bSelf = b.participantIds.length === 1 ? 1 : 0;
+        if (aSelf !== bSelf) return bSelf - aSelf;
+        return b.lastMessageAt - a.lastMessageAt;
+      });
+      cb(list);
+    },
+    (error) => {
+      console.error("Error al escuchar conversaciones:", error);
+    },
+  );
 }
 
 export function subscribeMessages(
@@ -265,13 +272,19 @@ export function subscribeMessages(
     collection(db!, "conversations", convId, "messages"),
     orderBy("createdAt", "asc"),
   );
-  return onSnapshot(q, (snap) => {
-    const msgs: ChatMessage[] = [];
-    snap.forEach((d) =>
-      msgs.push({ id: d.id, ...(d.data() as Omit<ChatMessage, "id">) }),
-    );
-    cb(msgs);
-  });
+  return onSnapshot(
+    q,
+    (snap) => {
+      const msgs: ChatMessage[] = [];
+      snap.forEach((d) =>
+        msgs.push({ id: d.id, ...(d.data() as Omit<ChatMessage, "id">) }),
+      );
+      cb(msgs);
+    },
+    (error) => {
+      console.error("Error al escuchar mensajes:", error);
+    },
+  );
 }
 
 export async function sendMessage(

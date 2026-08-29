@@ -1,7 +1,6 @@
 import type { ChatConversation } from "../../lib/chat";
-import type { Presence } from "../../lib/presence";
-import { Avatar } from "./Avatar";
-import { AvatarStack } from "./AvatarStack";
+import { isOnlineNow, type Presence } from "../../lib/presence";
+import { Avatar, GroupAvatar } from "./Avatar";
 import { formatTime } from "./time";
 
 interface ConversationListProps {
@@ -93,14 +92,9 @@ export function ConversationList({
         const peer = peerOf(conv, uid);
         const unread = conv.unread?.[uid] ?? 0;
         const active = conv.id === selectedId;
-        const memberList = Object.entries(conv.members ?? {}).map(([mUid, m]) => ({
-          uid: mUid,
-          displayName: m.displayName,
-          photoURL: m.photoURL,
-        }));
         const online = peer.isGroup
           ? false
-          : presence?.[peer.uid]?.online ?? false;
+          : isOnlineNow(presence?.[peer.uid]);
         const subtitle = peer.isSelf
           ? "Escríbete a ti mismo. Guarda notas y enlaces."
           : conv.lastMessageAt
@@ -122,9 +116,7 @@ export function ConversationList({
             >
               <span class="relative flex-none">
                 {peer.isGroup ? (
-                  <span class="block p-0.5">
-                    <AvatarStack members={memberList} />
-                  </span>
+                  <GroupAvatar name={peer.name} />
                 ) : (
                   <>
                     <Avatar uid={peer.uid} name={peer.name} photoURL={peer.photoURL} size="sm" />

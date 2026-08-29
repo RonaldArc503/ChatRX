@@ -70,7 +70,21 @@ export async function ensureProfile(
   const ref = profileRef(user.uid);
   const snap = await getDoc(ref);
   if (snap.exists()) {
-    return { uid: user.uid, ...(snap.data() as Omit<UserProfile, "uid">) };
+    const data = snap.data() as Omit<UserProfile, "uid">;
+    const patch: Partial<Omit<UserProfile, "uid">> = {};
+    const phone = normalizePhone(extras?.phone ?? "");
+    if (phone && !data.phone) {
+      await claimPhone(phone, user.uid);
+      patch.phone = phone;
+    }
+    const displayName = extras?.displayName?.trim();
+    if (displayName && !data.displayName) {
+      patch.displayName = displayName;
+    }
+    if (Object.keys(patch).length > 0) {
+      await setDoc(ref, patch, { merge: true });
+    }
+    return { uid: user.uid, ...data, ...patch };
   }
 
   const fallbackName =
@@ -159,11 +173,24 @@ export async function searchProfiles(term: string): Promise<UserProfile[]> {
   const results = new Map<string, UserProfile>();
 
   const typed = normalizePhone(t);
-  if (typed.length >= 8) {
-    const snap = await getDocs(query(col, where("phone", "==", typed)));
-    snap.forEach((d) =>
-      results.set(d.id, { uid: d.id, ...(d.data() as Omit<UserProfile, "uid">) }),
-    );
+  if (typed.length >= 4) {
+    if (typed.length >= 8) {
+      const snap = await getDocs(query(col, where("phone", "==", typed)));
+      snap.forEach((d) =>
+        results.set(d.id, { uid: d.id, ...(d.data() as Omit<UserProfile, "uid">) }),
+      );
+    } else {
+      const snap = await getDocs(
+        query(
+          col,
+          where("phone", ">=", typed),
+          where("phone", "<=", typed + "\uf8ff"),
+        ),
+      );
+      snap.forEach((d) =>
+        results.set(d.id, { uid: d.id, ...(d.data() as Omit<UserProfile, "uid">) }),
+      );
+    }
   }
 
   if (t.includes("@")) {

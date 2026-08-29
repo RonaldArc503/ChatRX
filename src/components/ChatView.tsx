@@ -79,18 +79,26 @@ export function ChatView({ user, targetId, onConsumeTarget }: ChatViewProps) {
 
   async function handlePick(peer: UserProfile) {
     if (!me) return;
-    const id = await getOrCreateConversation(me, peer);
-    if (!id) return;
-    setShowNewChat(false);
-    setSelectedId(id);
+    try {
+      const id = await getOrCreateConversation(me, peer);
+      if (!id) return;
+      setShowNewChat(false);
+      setSelectedId(id);
+    } catch (error) {
+      console.error("Error al iniciar la conversación:", error);
+    }
   }
 
   async function handleCreateGroup(name: string, members: UserProfile[]) {
     if (!me) return;
-    const id = await createGroup(me, name, members);
-    if (!id) return;
-    setShowNewGroup(false);
-    setSelectedId(id);
+    try {
+      const id = await createGroup(me, name, members);
+      if (!id) return;
+      setShowNewGroup(false);
+      setSelectedId(id);
+    } catch (error) {
+      console.error("Error al crear el grupo:", error);
+    }
   }
 
   if (!me) {

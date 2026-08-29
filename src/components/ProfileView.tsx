@@ -7,6 +7,8 @@ import {
   updateProfile,
   type UserProfile,
 } from "../lib/profile";
+import { ConverterView } from "./converter/ConverterView";
+import { SavedView } from "./saved/SavedView";
 
 interface ProfileViewProps {
   user: User;
@@ -21,6 +23,8 @@ export function ProfileView({ user, onLogout }: ProfileViewProps) {
   const [phone, setPhone] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showConverter, setShowConverter] = useState(false);
+  const [showSaved, setShowSaved] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -48,7 +52,7 @@ export function ProfileView({ user, onLogout }: ProfileViewProps) {
     .toUpperCase();
 
   function needsPhone() {
-    return !profile || !profile.phone;
+    return profile !== null && !profile.phone;
   }
 
   async function handleSave(e: SubmitEvent) {
@@ -87,6 +91,14 @@ export function ProfileView({ user, onLogout }: ProfileViewProps) {
     } finally {
       setBusy(false);
     }
+  }
+
+  if (showConverter) {
+    return <ConverterView onBack={() => setShowConverter(false)} />;
+  }
+
+  if (showSaved) {
+    return <SavedView user={user} onBack={() => setShowSaved(false)} />;
   }
 
   return (
@@ -194,6 +206,60 @@ export function ProfileView({ user, onLogout }: ProfileViewProps) {
           </button>
         </div>
       </form>
+
+      <section aria-label="Funcionalidades demo" class="mt-6">
+        <h2 class="mb-2 text-sm font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+          Funcionalidades demo
+        </h2>
+        <button
+          type="button"
+          onClick={() => setShowConverter(true)}
+          class="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800/60"
+        >
+          <span class="grid h-12 w-12 flex-none place-items-center rounded-2xl bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-400">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-6 w-6">
+              <path d="M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49.56 49.56 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24.12 24.12 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49.55 49.55 0 0 1-16.2 0A2 2 0 0 1 2.5 17" />
+              <path d="m10 15 5-3-5-3z" />
+            </svg>
+          </span>
+          <span class="min-w-0 flex-1">
+            <span class="block text-sm font-semibold text-slate-800 dark:text-slate-100">
+              Converter
+            </span>
+            <span class="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
+              Convierte videos de YouTube a MP3 o MP4.
+            </span>
+          </span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" class="h-4 w-4 flex-none text-slate-300 dark:text-slate-600">
+            <path d="m9 18 6-6-6-6" />
+          </svg>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setShowSaved(true)}
+          class="mt-2 flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800/60"
+        >
+          <span class="grid h-12 w-12 flex-none place-items-center rounded-2xl bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-400">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-6 w-6">
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+              <path d="M17 21v-8H7v8" />
+              <path d="M7 3v5h8" />
+            </svg>
+          </span>
+          <span class="min-w-0 flex-1">
+            <span class="block text-sm font-semibold text-slate-800 dark:text-slate-100">
+              Mis guardados
+            </span>
+            <span class="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
+              Mensajes y links que guardaste, con los más importantes fijados.
+            </span>
+          </span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" class="h-4 w-4 flex-none text-slate-300 dark:text-slate-600">
+            <path d="m9 18 6-6-6-6" />
+          </svg>
+        </button>
+      </section>
     </div>
   );
 }

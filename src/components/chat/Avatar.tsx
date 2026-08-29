@@ -81,3 +81,32 @@ export function Avatar({ uid, name, photoURL, size = "md" }: AvatarProps) {
     </span>
   );
 }
+
+export function groupColor(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) {
+    h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  }
+  return PALETTE[h % PALETTE.length];
+}
+
+export function GroupAvatar({
+  name,
+  size = "sm",
+}: {
+  name: string;
+  size?: "sm" | "md" | "lg";
+}) {
+  const initial = (name.trim().charAt(0) || "G").toUpperCase();
+  return (
+    <span
+      class={
+        SIZES[size] +
+        ` ${groupColor(name)} grid flex-none place-items-center rounded-full font-bold text-white`
+      }
+      aria-hidden="true"
+    >
+      {initial}
+    </span>
+  );
+}

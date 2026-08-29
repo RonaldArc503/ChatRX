@@ -7,8 +7,7 @@ import {
   type ChatConversation,
 } from "../../lib/chat";
 import { searchProfiles, type UserProfile } from "../../lib/profile";
-import { Avatar } from "./Avatar";
-import { AvatarStack } from "./AvatarStack";
+import { Avatar, GroupAvatar } from "./Avatar";
 import { formatDayLabel } from "./time";
 
 interface GroupInfoSheetProps {
@@ -140,7 +139,7 @@ export function GroupInfoSheet({
           ) : null}
 
           <div class="flex flex-col items-center gap-2 px-2 py-4">
-            <AvatarStack members={members} size="md" />
+            <GroupAvatar name={conv.name || "Grupo"} size="md" />
             {renaming ? (
               <div class="flex w-full items-center gap-2">
                 <input

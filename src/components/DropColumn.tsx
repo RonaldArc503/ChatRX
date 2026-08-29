@@ -1,12 +1,10 @@
-import { useState } from "preact/hooks";
-import type { ComponentChildren } from "preact";
+import { type ComponentChildren } from "preact";
 import type { TaskStatus } from "../lib/todo";
 import { STATUS_META } from "../lib/todo";
 
 interface DropColumnProps {
   status: TaskStatus;
   count: number;
-  onDrop: (todoId: string, status: TaskStatus) => void;
   onClear?: () => void;
   active?: boolean;
   children: ComponentChildren;
@@ -21,41 +19,17 @@ const DOT_STYLES: Record<TaskStatus, string> = {
 export function DropColumn({
   status,
   count,
-  onDrop,
   onClear,
   active,
   children,
 }: DropColumnProps) {
-  const [over, setOver] = useState(false);
   const meta = STATUS_META[status];
-
-  function handleDragOver(e: DragEvent) {
-    e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-    setOver(true);
-  }
-
-  function handleDragLeave(e: DragEvent) {
-    const target = e.currentTarget as Node | null;
-    if (!target || !target.contains(e.relatedTarget as Node | null)) {
-      setOver(false);
-    }
-  }
-
-  function handleDrop(e: DragEvent) {
-    e.preventDefault();
-    setOver(false);
-    const id = e.dataTransfer?.getData("text/plain");
-    if (id) onDrop(id, status);
-  }
 
   return (
     <section
       class={
         "overflow-hidden rounded-2xl border bg-white shadow-sm transition-[border-color,box-shadow] dark:bg-slate-900" +
-        (over
-          ? " border-indigo-400 ring-2 ring-indigo-100"
-          : " border-slate-200 dark:border-slate-800") +
+        " border-slate-200 dark:border-slate-800" +
         (active ? " block" : " hidden") +
         " lg:block"
       }
@@ -83,10 +57,6 @@ export function DropColumn({
       </header>
       <ul
         class="flex min-h-16 flex-col gap-2 p-2.5"
-        onDragOver={handleDragOver}
-        onDragEnter={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
         aria-label={meta.label}
       >
         {children}

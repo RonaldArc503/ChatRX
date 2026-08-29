@@ -21,12 +21,32 @@ type Listener = (state: AudioPlayerState) => void;
 
 const listeners = new Set<Listener>();
 
+const MODE_KEY = "taskly-audio-mode";
+
+function loadStoredMode(): AudioMode {
+  try {
+    const raw = localStorage.getItem(MODE_KEY);
+    if (raw === "queue" || raw === "repeat" || raw === "loop") return raw;
+  } catch {
+    // localStorage no disponible
+  }
+  return "queue";
+}
+
+function persistMode() {
+  try {
+    localStorage.setItem(MODE_KEY, mode);
+  } catch {
+    // localStorage no disponible
+  }
+}
+
 let audio: HTMLAudioElement | null = null;
 let tracks: AudioTrack[] = [];
 let currentId: string | null = null;
 let currentTrack: AudioTrack | null = null;
 let playing = false;
-let mode: AudioMode = "queue";
+let mode: AudioMode = loadStoredMode();
 let currentTime = 0;
 let duration = 0;
 let tick: number | null = null;
@@ -170,21 +190,25 @@ export function toggleTrack(track: AudioTrack) {
 
 export function playWithQueue(track: AudioTrack) {
   mode = "queue";
+  persistMode();
   playTrack(track);
 }
 
 export function playWithRepeat(track: AudioTrack) {
   mode = "repeat";
+  persistMode();
   playTrack(track);
 }
 
 export function playWithLoop(track: AudioTrack) {
   mode = "loop";
+  persistMode();
   playTrack(track);
 }
 
 export function setAudioMode(m: AudioMode) {
   mode = m;
+  persistMode();
   emit();
 }
 

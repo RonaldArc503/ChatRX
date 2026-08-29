@@ -20,12 +20,33 @@ import { HomeView } from "./HomeView";
 import { ProfileView } from "./ProfileView";
 import { TodoApp } from "./TodoApp";
 import { AudioPlayerBar } from "./chat/AudioPlayerBar";
+import { SavedView } from "./saved/SavedView";
+import { RemindersView } from "./reminders/RemindersView";
+import {
+  flushFirestoreWrites,
+  isOnline,
+  subscribeOnlineChange,
+} from "../lib/offline";
 
 export function AppRoot() {
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const [view, setView] = useState<View>("home");
   const [chatTargetId, setChatTargetId] = useState<string | null>(null);
   const [notice, setNotice] = useState(false);
+  const [isOffline, setIsOffline] = useState(() => !isOnline());
+
+  useEffect(() => {
+    return subscribeOnlineChange((online) => {
+      setIsOffline(!online);
+      if (online) flushFirestoreWrites().catch(() => {});
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isOffline) return;
+    const id = window.setTimeout(() => setIsOffline(false), 5000);
+    return () => window.clearTimeout(id);
+  }, [isOffline]);
 
   useEffect(() => {
     initAnalytics();
@@ -134,6 +155,23 @@ export function AppRoot() {
         </div>
       ) : null}
 
+      {isOffline ? (
+        <div class="fixed inset-x-0 top-[calc(var(--audio-bar-h)+1rem)] z-50 mx-auto w-fit max-w-[calc(100vw-2rem)]">
+          <div class="flex items-center gap-2 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 shadow-sm dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-5 w-5 flex-none">
+              <path d="M1 1l22 22" />
+              <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55" />
+              <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39" />
+              <path d="M10.71 5.05A16 16 0 0 1 22.58 9" />
+              <path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88" />
+              <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
+              <path d="M12 20h.01" />
+            </svg>
+            Sin conexión. Los cambios se sincronizarán cuando vuelvas a estar en línea.
+          </div>
+        </div>
+      ) : null}
+
       <BottomNav view={view} onNavigate={setView} />
 
       <main
@@ -170,6 +208,8 @@ export function AppRoot() {
             onConsumeTarget={() => setChatTargetId(null)}
           />
         ) : null}
+        {view === "saved" ? <SavedView user={user} /> : null}
+        {view === "reminders" ? <RemindersView user={user} /> : null}
         {view === "profile" ? <ProfileView user={user} onLogout={handleLogout} /> : null}
       </main>
     </div>

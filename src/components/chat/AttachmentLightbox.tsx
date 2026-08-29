@@ -38,6 +38,7 @@ export function AttachmentLightbox({
   const lastTap = useRef(0);
   const start = useRef<{ x: number; y: number } | null>(null);
   const downXY = useRef<{ x: number; y: number } | null>(null);
+  const wasTap = useRef(false);
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const scaleRef = useRef(1);
@@ -160,14 +161,15 @@ export function AttachmentLightbox({
     if (pointers.current.size === 0) {
       const dxRaw = e.clientX - (down?.x ?? e.clientX);
       const dy = e.clientY - (down?.y ?? e.clientY);
+      const moved = Math.hypot(
+        e.clientX - (downXY.current?.x ?? e.clientX),
+        e.clientY - (downXY.current?.y ?? e.clientY),
+      );
+      wasTap.current = moved < TAP_MOVE_PX;
       setDragging(false);
       setDx(0);
 
       if (scaleRef.current <= 1.001) {
-        const moved = Math.hypot(
-          e.clientX - (downXY.current?.x ?? e.clientX),
-          e.clientY - (downXY.current?.y ?? e.clientY),
-        );
         if (moved < TAP_MOVE_PX) {
           const now = Date.now();
           if (now - lastTap.current < DOUBLE_TAP_MS) {
@@ -202,7 +204,12 @@ export function AttachmentLightbox({
   const transformed = scale > 1.001 || pan.x !== 0 || pan.y !== 0;
 
   return (
-    <div class="fixed inset-0 z-50 flex flex-col bg-black/95" onClick={onClose}>
+    <div
+      class="fixed inset-0 z-50 flex flex-col bg-black/95"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
       <div
         class="flex items-center justify-between gap-2 px-4 py-3 text-white"
         onClick={(e) => e.stopPropagation()}
@@ -273,7 +280,14 @@ export function AttachmentLightbox({
           transform: `translateX(${dragging && !transformed ? dx : 0}px)`,
           transition: dragging ? "none" : "transform 0.2s ease",
         }}
-        onClick={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          if (e.target === e.currentTarget && wasTap.current) {
+            wasTap.current = false;
+            onClose();
+          } else if (e.target === e.currentTarget) {
+            wasTap.current = false;
+          }
+        }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}

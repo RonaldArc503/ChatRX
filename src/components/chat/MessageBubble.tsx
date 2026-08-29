@@ -64,6 +64,7 @@ export function MessageBubble({
   function handlePointerDown(e: PointerEvent) {
     start.current = { x: e.clientX, y: e.clientY };
     clearTimer();
+    if (e.pointerType === "mouse") return;
     timer.current = window.setTimeout(() => {
       timer.current = null;
       longPressAt.current = Date.now();
@@ -133,7 +134,7 @@ export function MessageBubble({
       <div
         data-message-id={msg.id}
         class={
-          "max-w-[80%] select-none rounded-[18px] shadow-sm " +
+          "max-w-[80%] pointer-coarse:select-none rounded-[18px] shadow-sm " +
           (hasMedia ? "overflow-hidden p-0 " : "px-3.5 py-2 ") +
           (highlighted ? "msg-highlight " : "") +
           (mine
@@ -257,6 +258,16 @@ export function MessageBubble({
             }
           >
             {isPinned ? <span class="mr-1 align-middle"><PinIcon /></span> : null}
+            {msg.pending ? (
+              <span
+                class={
+                  "mr-1 font-semibold uppercase " +
+                  (mine ? "text-indigo-200" : "text-amber-500 dark:text-amber-400")
+                }
+              >
+                Pendiente
+              </span>
+            ) : null}
             {msg.edited ? (
               <span class="mr-1 italic opacity-80">editado</span>
             ) : null}
@@ -518,7 +529,11 @@ interface AudioCardProps {
 function AudioCard({ a, mine, track }: AudioCardProps) {
   const [state, setState] = useState(() => getAudioState());
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuBelow, setMenuBelow] = useState(false);
+  const [dragRatio, setDragRatio] = useState<number | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
+  const menuAnchorRef = useRef<HTMLDivElement>(null);
+  const dragging = useRef(false);
 
   useEffect(() => subscribeAudio(setState), []);
 
@@ -527,6 +542,8 @@ function AudioCard({ a, mine, track }: AudioCardProps) {
   const now = isCurrent ? state.currentTime : 0;
   const dur = isCurrent && state.duration > 0 ? state.duration : durationCompat(a);
   const pct = dur > 0 ? Math.min(100, (now / dur) * 100) : 0;
+  const displayPct = dragRatio !== null ? dragRatio * 100 : pct;
+  const displayNow = dragRatio !== null && dur > 0 ? dragRatio * dur : now;
 
   function handlePlayPause(e: MouseEvent) {
     e.stopPropagation();
@@ -542,18 +559,64 @@ function AudioCard({ a, mine, track }: AudioCardProps) {
     }
   }
 
-  function handleSeek(e: MouseEvent) {
+  const dragHandlersRef = useRef<{
+    move: (e: PointerEvent) => void;
+    up: (e: PointerEvent) => void;
+  } | null>(null);
+
+  function ratioFromEvent(e: PointerEvent): number {
     const el = barRef.current;
-    if (!el || dur <= 0) return;
+    if (!el) return 0;
     const rect = el.getBoundingClientRect();
-    const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
-    seekAudio(ratio * dur);
+    return Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
   }
+
+  function endDrag(commit: boolean, e?: PointerEvent) {
+    dragging.current = false;
+    setDragRatio(null);
+    if (commit && e && dur > 0) {
+      seekAudio(ratioFromEvent(e) * dur);
+    }
+    const handlers = dragHandlersRef.current;
+    if (handlers) {
+      window.removeEventListener("pointermove", handlers.move);
+      window.removeEventListener("pointerup", handlers.up);
+      window.removeEventListener("pointercancel", handlers.up);
+      dragHandlersRef.current = null;
+    }
+  }
+
+  function handleBarPointerDown(e: PointerEvent) {
+    if (!isCurrent) return;
+    e.preventDefault();
+    dragging.current = true;
+    setDragRatio(ratioFromEvent(e));
+    const move = (ev: PointerEvent) => {
+      if (dragging.current) setDragRatio(ratioFromEvent(ev));
+    };
+    const up = (ev: PointerEvent) => endDrag(true, ev);
+    dragHandlersRef.current = { move, up };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  }
+
+  useEffect(() => {
+    return () => {
+      const handlers = dragHandlersRef.current;
+      if (handlers) {
+        window.removeEventListener("pointermove", handlers.move);
+        window.removeEventListener("pointerup", handlers.up);
+        window.removeEventListener("pointercancel", handlers.up);
+        dragHandlersRef.current = null;
+      }
+    };
+  }, []);
 
   return (
     <div
       class={
-        "relative flex max-w-full select-none flex-row items-center gap-3 rounded-2xl px-3 py-2.5 " +
+        "relative flex w-64 max-w-full select-none flex-row items-center gap-3 rounded-2xl px-3 py-2.5 " +
         (mine
           ? "bg-white/15"
           : "bg-slate-100 dark:bg-slate-700/50")
@@ -597,38 +660,78 @@ function AudioCard({ a, mine, track }: AudioCardProps) {
             (mine ? "text-indigo-100/80" : "text-slate-500 dark:text-slate-400")
           }
         >
-          {isPlaying || isCurrent ? `${formatDuration(now)} / ${formatDuration(dur)}` : formatBytes(a.size)}
+          {isPlaying || isCurrent ? `${formatDuration(displayNow)} / ${formatDuration(dur)}` : formatBytes(a.size)}
         </span>
         <div
           ref={barRef}
-          onClick={handleSeek}
           class={
-            "group relative mt-1.5 h-1 w-full cursor-pointer overflow-hidden rounded-full " +
-            (mine ? "bg-white/25" : "bg-slate-300 dark:bg-slate-600")
+            "-my-2 py-2 " +
+            (isCurrent ? "cursor-pointer" : "cursor-default")
           }
           role="slider"
           aria-label="Progreso del audio"
           aria-valuemin={0}
           aria-valuemax={Math.round(dur)}
-          aria-valuenow={Math.round(now)}
+          aria-valuenow={Math.round(displayNow)}
+          aria-disabled={!isCurrent}
+          style={{ touchAction: "none" }}
+          onPointerDown={handleBarPointerDown}
         >
           <div
             class={
-              "absolute inset-y-0 left-0 rounded-full " +
-              (mine ? "bg-white" : "bg-emerald-500")
+              "group relative mt-1.5 h-1 w-full rounded-full " +
+              (mine ? " bg-white/25" : " bg-slate-300 dark:bg-slate-600")
             }
-            style={{ width: `${pct}%` }}
-          />
+          >
+            <div
+              class={
+                "absolute inset-y-0 left-0 rounded-full " +
+                (mine ? "bg-white" : "bg-emerald-500")
+              }
+              style={{ width: `${displayPct}%` }}
+            />
+            {isCurrent ? (
+              <span
+                class={
+                  "pointer-events-none absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full shadow " +
+                  "h-3.5 w-3.5 " +
+                  (mine ? "bg-white" : "bg-emerald-600 ring-2 ring-white dark:ring-slate-900")
+                }
+                style={{ left: `${displayPct}%` }}
+              />
+            ) : null}
+          </div>
         </div>
       </span>
 
-      <div class="relative flex-none">
+      <div ref={menuAnchorRef} class="relative flex-none">
         <button
           type="button"
           aria-label="Opciones de reproducción"
           onClick={(e) => {
             e.stopPropagation();
-            setMenuOpen((v) => !v);
+            if (menuOpen) {
+              setMenuOpen(false);
+              return;
+            }
+            const el = menuAnchorRef.current;
+            let below = false;
+            if (el) {
+              const anchorRect = el.getBoundingClientRect();
+              const scrollEl = el.closest(".chat-bg");
+              if (scrollEl) {
+                const rect = scrollEl.getBoundingClientRect();
+                const spaceAbove = anchorRect.top - rect.top;
+                const spaceBelow = rect.bottom - anchorRect.bottom;
+                const menuEst = 220;
+                const fitAbove = spaceAbove >= menuEst;
+                const fitBelow = spaceBelow >= menuEst;
+                below =
+                  fitAbove === fitBelow ? spaceBelow > spaceAbove : fitBelow;
+              }
+            }
+            setMenuBelow(below);
+            setMenuOpen(true);
           }}
           class={
             "grid h-7 w-7 place-items-center rounded-full transition-colors " +
@@ -655,7 +758,10 @@ function AudioCard({ a, mine, track }: AudioCardProps) {
             />
             <div
               class={
-                "absolute right-0 bottom-8 z-30 w-60 overflow-hidden rounded-2xl border p-1 shadow-2xl " +
+                (menuBelow
+                  ? "absolute right-0 top-9 "
+                  : "absolute right-0 bottom-8 ") +
+                "z-30 w-60 overflow-hidden rounded-2xl border p-1 shadow-2xl " +
                 (mine
                   ? "border-white/15 bg-slate-800 text-white"
                   : "border-slate-200 bg-white text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100")

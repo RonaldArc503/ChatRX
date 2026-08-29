@@ -24,7 +24,10 @@ export function Swipeable({
   const [dx, setDx] = useState(0);
 
   function handlePointerDown(e: PointerEvent) {
-    if (e.pointerType !== "touch") return;
+    if (e.pointerType !== "touch" && e.pointerType !== "mouse" && e.pointerType !== "pen") {
+      return;
+    }
+    if ((e.target as HTMLElement | null)?.closest?.("button")) return;
     start.current = { x: e.clientX, y: e.clientY };
     setDragging(true);
     (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
@@ -77,6 +80,7 @@ export function Swipeable({
       class={className}
       style={{
         touchAction: "pan-y",
+        userSelect: dragging ? "none" : undefined,
         transform: `translateX(${dx}px)`,
         transition: leaving
           ? "transform 0.18s ease"

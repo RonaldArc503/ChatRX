@@ -25,18 +25,35 @@ import {
 } from "../../lib/typing";
 import { optimizeVideo } from "../../lib/videoOptimizer";
 import { updatePlaylist } from "../../lib/audioPlayer";
-import type { Presence } from "../../lib/presence";
+import { splitLinks } from "./linkify";
+import {
+  createSavedItem,
+  saveMessage,
+} from "../../lib/saved";
+import {
+  flushFirestoreWrites,
+  isOnline,
+  subscribeOnlineChange,
+} from "../../lib/offline";
+import {
+  type PendingMessage,
+  enqueuePending,
+  flushPending,
+  listPending,
+  newLocalId,
+  removePending,
+} from "../../lib/pendingMessages";
+import { isOnlineNow, type Presence } from "../../lib/presence";
 import type { UserProfile } from "../../lib/profile";
 import { AttachmentLightbox, type LightboxItem } from "./AttachmentLightbox";
-import { Avatar } from "./Avatar";
-import { AvatarStack } from "./AvatarStack";
+import { Avatar, GroupAvatar } from "./Avatar";
 import { peerOf } from "./ConversationList";
 import { ForwardSheet } from "./ForwardSheet";
 import { GroupInfoSheet } from "./GroupInfoSheet";
 import { extractMentions, mentionContacts } from "./mention";
 import { MessageActionsSheet } from "./MessageActionsSheet";
 import { MessageBubble } from "./MessageBubble";
-import { formatDayLabel, formatTime, sameDay } from "./time";
+import { formatDayLabel, formatLastSeen, sameDay } from "./time";
 
 interface AttachmentDraft {
   id: string;
@@ -55,6 +72,28 @@ interface ConversationWindowProps {
   peerPresence?: Presence | null;
   conversations: ChatConversation[];
   onBack: () => void;
+}
+
+function mergePendingMessages(
+  real: ChatMessage[],
+  pendingMsgs: ChatMessage[],
+): ChatMessage[] {
+  if (pendingMsgs.length === 0) return real;
+  const realIds = new Set(real.map((m) => m.id));
+  const merged = [...real];
+  for (const pm of pendingMsgs) {
+    if (realIds.has(pm.id)) continue;
+    const duplicated = real.some(
+      (m) => m.senderId === pm.senderId && m.text === pm.text,
+    );
+    if (duplicated) {
+      removePending(pm.id).catch(() => {});
+      continue;
+    }
+    merged.push(pm);
+  }
+  merged.sort((a, b) => a.createdAt - b.createdAt);
+  return merged;
 }
 
 export function ConversationWindow({
@@ -89,6 +128,8 @@ export function ConversationWindow({
   const [mentionOpen, setMentionOpen] = useState(false);
   const [mentionQuery, setMentionQuery] = useState("");
   const [mentionIndex, setMentionIndex] = useState(0);
+  const [pending, setPending] = useState<PendingMessage[]>([]);
+  const [online, setOnline] = useState(() => isOnline());
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
@@ -96,7 +137,20 @@ export function ConversationWindow({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastTypingSent = useRef(0);
+  const flushing = useRef(false);
+  const lastScrollH = useRef<number | null>(null);
   const NEAR_BOTTOM_PX = 120;
+
+let coarsePointer: boolean | null = null;
+function isCoarsePointer(): boolean {
+  if (coarsePointer === null) {
+    coarsePointer =
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(pointer: coarse)").matches;
+  }
+  return coarsePointer;
+}
   function scrollToAbsoluteEnd() {
     const el = scrollRef.current;
     if (!el) return;
@@ -140,11 +194,6 @@ export function ConversationWindow({
   const peer = peerOf(conv, me.uid);
   const isGroup = peer.isGroup;
   const members = conv.members ?? {};
-  const memberList = Object.entries(members).map(([uid, m]) => ({
-    uid,
-    displayName: m.displayName,
-    photoURL: m.photoURL,
-  }));
   const mentionContactsList = mentionContacts(members, me.uid);
   const mentionFiltered = mentionOpen
     ? mentionContactsList.filter((c) =>
@@ -170,6 +219,40 @@ export function ConversationWindow({
   function handleForward(m: ChatMessage) {
     setMenuMsg(null);
     setForwardMsg(m);
+  }
+
+  async function handleSave(m: ChatMessage) {
+    setMenuMsg(null);
+    const text = m.text.trim();
+    if (!text && !(m.attachments && m.attachments.length > 0)) return;
+    const links = splitLinks(text)
+      .filter((seg) => seg.url)
+      .map((seg) => seg.url as string);
+    const senderName = m.senderId === me.uid
+      ? me.displayName
+      : isGroup
+        ? members[m.senderId]?.displayName || "Miembro"
+        : peer.name;
+    const item = createSavedItem({
+      kind: links.length > 0 && !(m.attachments && m.attachments.length > 0)
+        ? "link"
+        : "message",
+      text,
+      links,
+      attachments: m.attachments ?? [],
+      senderId: m.senderId,
+      senderName,
+      convId: conv.id,
+      convName: peer.isGroup ? conv.name || "Grupo" : peer.name,
+      createdAt: m.createdAt,
+    });
+    try {
+      await saveMessage(me.uid, item);
+    } catch (err) {
+      setSendError(
+        err instanceof Error ? err.message : "No se pudo guardar el mensaje.",
+      );
+    }
   }
 
   useEffect(() => {
@@ -199,6 +282,53 @@ export function ConversationWindow({
   }, [messages, conv.id, me.uid]);
 
   useEffect(() => {
+    let active = true;
+    listPending(conv.id).then((list) => {
+      if (active) setPending(list);
+    });
+    return () => {
+      active = false;
+    };
+  }, [conv.id, online]);
+
+  useEffect(() => {
+    return subscribeOnlineChange(setOnline);
+  }, []);
+
+  useEffect(() => {
+    if (!online || flushing.current) return;
+    let active = true;
+    flushing.current = true;
+    (async () => {
+      const pendingList = await listPending();
+      if (pendingList.length > 0) {
+        await flushPending((pm) =>
+          sendMessage(
+            pm.convId,
+            pm.senderId,
+            pm.text,
+            pm.replyTo ?? null,
+            undefined,
+            pm.mentions,
+            pm.forwardedFrom ?? null,
+          ),
+        );
+      }
+      await flushFirestoreWrites();
+      if (active) {
+        listPending(conv.id).then(setPending);
+      }
+    })()
+      .catch(() => {})
+      .finally(() => {
+        flushing.current = false;
+      });
+    return () => {
+      active = false;
+    };
+  }, [online, conv.id]);
+
+  useEffect(() => {
     stickRef.current = true;
     entryPending.current = true;
     setShowJump(false);
@@ -208,6 +338,22 @@ export function ConversationWindow({
     });
     return () => cancelAnimationFrame(frame);
   }, [conv.id]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    lastScrollH.current = el.clientHeight;
+    const ro = new ResizeObserver(() => {
+      const cur = el.clientHeight;
+      const prev = lastScrollH.current;
+      lastScrollH.current = cur;
+      if (prev === null || prev === cur) return;
+      const max = Math.max(0, el.scrollHeight - el.clientHeight);
+      el.scrollTop = Math.max(0, Math.min(el.scrollTop + (prev - cur), max));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -392,6 +538,23 @@ export function ConversationWindow({
     addFiles(files);
   }
 
+  function handlePaste(e: ClipboardEvent) {
+    if (editing || uploading) return;
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const files: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.kind === "file") {
+        const file = item.getAsFile();
+        if (file) files.push(file);
+      }
+    }
+    if (files.length === 0) return;
+    e.preventDefault();
+    addFiles(files);
+  }
+
   function handleDragEnter(e: DragEvent) {
     if (uploading || editing || !e.dataTransfer?.types.includes("Files")) return;
     e.preventDefault();
@@ -551,8 +714,28 @@ export function ConversationWindow({
 
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+      if (isCoarsePointer()) {
+        insertNewline();
+        return;
+      }
       handleSubmit();
     }
+  }
+
+  function insertNewline() {
+    const el = inputRef.current;
+    if (!el) return;
+    const start = el.selectionStart ?? text.length;
+    const end = el.selectionEnd ?? start;
+    const updated = text.slice(0, start) + "\n" + text.slice(end);
+    el.value = updated;
+    setText(updated);
+    requestAnimationFrame(() => {
+      el.focus();
+      const pos = start + 1;
+      el.setSelectionRange(pos, pos);
+      autoGrow(el);
+    });
   }
 
   function insertMention(name: string) {
@@ -595,11 +778,16 @@ export function ConversationWindow({
 
   async function handleSubmit() {
     const value = text.trim();
+    const onlineNow = isOnline();
     setSendError(null);
     clearTyping(conv.id, me.uid);
 
     if (editing) {
       if (!value) return;
+      if (!onlineNow) {
+        setSendError("Sin conexión: no se puede editar ahora.");
+        return;
+      }
       try {
         await editMessage(conv.id, editing.id, value);
         setEditing(null);
@@ -615,6 +803,11 @@ export function ConversationWindow({
 
     const hasPending = pendingFiles.length > 0;
     if (!value && !hasPending) return;
+
+    if (hasPending && !onlineNow) {
+      setSendError("Sin conexión: no se pueden subir archivos.");
+      return;
+    }
 
     if (hasPending) {
       if (uploading) return;
@@ -689,10 +882,35 @@ export function ConversationWindow({
       return;
     }
 
+    const mentionedIds = isGroup ? extractMentions(value, members) : [];
+    if (!onlineNow) {
+      const pm: PendingMessage = {
+        localId: newLocalId(),
+        convId: conv.id,
+        senderId: me.uid,
+        text: value,
+        createdAt: Date.now(),
+        replyTo: replyMsg
+          ? {
+              id: replyMsg.id,
+              text: replyMsg.text,
+              senderId: replyMsg.senderId,
+            }
+          : null,
+        mentions: mentionedIds,
+      };
+      await enqueuePending(pm);
+      setPending((prev) => [...prev, pm]);
+      setReplyMsg(null);
+      setText("");
+      stickRef.current = true;
+      setShowJump(false);
+      if (inputRef.current) inputRef.current.style.height = "auto";
+      return;
+    }
     setText("");
     stickRef.current = true;
     setShowJump(false);
-    const mentionedIds = isGroup ? extractMentions(value, members) : [];
     try {
       await sendMessage(
         conv.id,
@@ -771,14 +989,24 @@ export function ConversationWindow({
     }
   }
 
-  function lastSeenText(ts: number): string {
-    if (!ts) return "Sin conexión";
-    return `Visto ${formatDayLabel(ts)} · ${formatTime(ts)}`;
-  }
+  const pendingForConv = pending
+    .filter((p) => p.convId === conv.id)
+    .map((p): ChatMessage => ({
+      id: p.localId,
+      senderId: p.senderId,
+      text: p.text,
+      createdAt: p.createdAt,
+      replyTo: p.replyTo ?? null,
+      mentions: p.mentions,
+      forwardedFrom: p.forwardedFrom ?? null,
+      pending: true,
+    }));
+
+  const displayMessages = mergePendingMessages(messages, pendingForConv);
 
   const items: preact.ComponentChildren[] = [];
-  messages.forEach((msg, i) => {
-    const previous = messages[i - 1];
+  displayMessages.forEach((msg, i) => {
+    const previous = displayMessages[i - 1];
     if (!previous || !sameDay(previous.createdAt, msg.createdAt)) {
       items.push(
         <div key={"day-" + msg.id} class="flex justify-center py-2.5">
@@ -841,10 +1069,18 @@ export function ConversationWindow({
         </button>
         {isGroup ? (
           <span class="flex-none">
-            <AvatarStack members={memberList} size="sm" />
+            <GroupAvatar name={conv.name || "Grupo"} size="sm" />
           </span>
         ) : (
-          <Avatar uid={peer.uid} name={peer.name} photoURL={peer.photoURL} size="sm" />
+          <span class="relative flex-none">
+            <Avatar uid={peer.uid} name={peer.name} photoURL={peer.photoURL} size="sm" />
+            {isOnlineNow(peerPresence) && !peer.isSelf ? (
+              <span
+                class="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white bg-emerald-500 dark:border-slate-900"
+                aria-label="En línea"
+              />
+            ) : null}
+          </span>
         )}
         <button
           type="button"
@@ -868,13 +1104,13 @@ export function ConversationWindow({
             <span class="block text-xs font-medium text-indigo-600 dark:text-indigo-400">
               escribiendo…
             </span>
-          ) : peerPresence?.online ? (
+          ) : isOnlineNow(peerPresence) ? (
             <span class="block text-xs font-medium text-emerald-600 dark:text-emerald-400">
               En línea
             </span>
           ) : peerPresence ? (
             <span class="block text-xs text-slate-500 dark:text-slate-400">
-              {lastSeenText(peerPresence.lastSeen)}
+              {formatLastSeen(peerPresence.lastSeen)}
             </span>
           ) : (
             <span class="block truncate text-xs text-slate-500 dark:text-slate-400">
@@ -997,7 +1233,7 @@ export function ConversationWindow({
           ref={scrollRef}
           onScroll={handleScroll}
         >
-          {messages.length === 0 ? (
+          {displayMessages.length === 0 ? (
             <div class="flex h-full flex-col items-center justify-center gap-2 text-center">
               <p class="text-sm font-semibold text-slate-600 dark:text-slate-300">
                 Esta es tu conversación con {peer.name}.
@@ -1250,6 +1486,7 @@ export function ConversationWindow({
               updateMentionAutocomplete(el);
             }}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
           />
           <button
             type="submit"
@@ -1290,6 +1527,7 @@ export function ConversationWindow({
         onReact={handleReact}
         onPin={handlePin}
         onForward={handleForward}
+        onSave={handleSave}
       />
 
       {forwardMsg ? (
