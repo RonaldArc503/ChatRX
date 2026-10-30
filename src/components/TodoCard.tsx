@@ -4,6 +4,7 @@ import { Swipeable } from "./Swipeable";
 
 interface TodoCardProps {
   todo: Todo;
+  isOldest?: boolean;
   onMove: (id: string, status: TaskStatus) => void;
   onDelete: (id: string) => void;
 }
@@ -26,7 +27,7 @@ const CARD_STYLES: Record<
   },
 };
 
-export function TodoCard({ todo, onMove, onDelete }: TodoCardProps) {
+export function TodoCard({ todo, isOldest, onMove, onDelete }: TodoCardProps) {
   const meta = STATUS_META[todo.status];
   const styles = CARD_STYLES[todo.status];
 
@@ -48,7 +49,8 @@ export function TodoCard({ todo, onMove, onDelete }: TodoCardProps) {
       class={
         "rounded-xl border border-slate-200 border-l-[3px] bg-white shadow-sm transition-[box-shadow,opacity] focus-visible:ring-2 focus-visible:ring-indigo-400 dark:border-slate-700 dark:bg-slate-900" +
         " " +
-        styles.item
+        styles.item +
+        (isOldest ? " ring-2 ring-amber-400 bg-amber-50/40 dark:bg-amber-950/20" : "")
       }
       tabIndex={0}
       onKeyDown={handleKeyDown}

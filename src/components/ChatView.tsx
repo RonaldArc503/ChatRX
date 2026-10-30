@@ -14,6 +14,7 @@ import { ConversationList, peerOf } from "./chat/ConversationList";
 import { ConversationWindow } from "./chat/ConversationWindow";
 import { GroupCreateFlow } from "./chat/GroupCreateFlow";
 import { NewChatSearch } from "./chat/NewChatSearch";
+import { useChatSidebar } from "./chat/useChatSidebar";
 
 interface ChatViewProps {
   user: User;
@@ -28,6 +29,17 @@ export function ChatView({ user, targetId, onConsumeTarget }: ChatViewProps) {
   const [showNewChat, setShowNewChat] = useState(false);
   const [showNewGroup, setShowNewGroup] = useState(false);
   const [presence, setPresence] = useState<Record<string, Presence>>({});
+  const sidebar = useChatSidebar();
+
+  function openNewChat() {
+    sidebar.expand();
+    setShowNewChat(true);
+  }
+
+  function openNewGroup() {
+    sidebar.expand();
+    setShowNewGroup(true);
+  }
 
   useEffect(() => {
     if (!targetId) return;
@@ -152,10 +164,14 @@ export function ChatView({ user, targetId, onConsumeTarget }: ChatViewProps) {
   };
 
   return (
-    <div class="fixed inset-x-0 top-[var(--audio-bar-h)] z-[45] flex h-[calc(100dvh-var(--nav-h)-var(--audio-bar-h))] min-h-0 flex-col overflow-hidden bg-white dark:bg-slate-900 lg:flex-row">
+    <div class="fixed inset-x-0 top-[var(--audio-bar-h)] z-[45] flex h-[calc(100dvh-var(--nav-h)-var(--audio-bar-h))] min-h-0 flex-col overflow-hidden bg-white dark:bg-slate-900 lg:left-[var(--app-rail-w)] lg:flex-row">
       <aside
+        id="chat-sidebar"
+        aria-label="Conversaciones"
+        data-collapsed={sidebar.collapsed ? "true" : "false"}
+        style={{ "--chat-sidebar-width": `${sidebar.width}px` }}
         class={
-          "min-h-0 flex-col bg-white dark:bg-slate-900 lg:w-80 lg:max-w-xs lg:shrink-0 lg:border-r lg:border-slate-200 lg:dark:border-slate-800 " +
+          "chat-sidebar relative min-h-0 flex-col bg-white dark:bg-slate-900 lg:shrink-0 lg:border-r lg:border-slate-200 lg:dark:border-slate-800 " +
           (panelOpen ? "hidden lg:flex" : "flex")
         }
       >
@@ -173,13 +189,29 @@ export function ChatView({ user, targetId, onConsumeTarget }: ChatViewProps) {
           />
         ) : (
           <>
-            <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
-              <h2 class="text-lg font-bold text-slate-900 dark:text-white">Mensajes</h2>
-              <div class="flex items-center gap-1.5">
+            <div class="chat-sidebar-header flex shrink-0 items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800 lg:min-h-[88px]">
+              <h2 class="chat-sidebar-details text-lg font-bold text-slate-900 dark:text-white lg:text-2xl">Mensajes</h2>
+              <div class="chat-sidebar-actions flex items-center gap-1.5">
+                <button
+                  type="button"
+                  aria-label={sidebar.collapsed ? "Expandir lista de chats" : "Contraer lista de chats"}
+                  title={sidebar.collapsed ? "Expandir lista de chats" : "Contraer lista de chats"}
+                  aria-controls="chat-sidebar"
+                  aria-expanded={!sidebar.collapsed}
+                  onClick={sidebar.toggle}
+                  class="hidden h-9 w-9 shrink-0 place-items-center rounded-full text-slate-500 transition-colors hover:bg-indigo-50 hover:text-indigo-600 focus-visible:outline-2 focus-visible:outline-indigo-500 dark:text-slate-300 dark:hover:bg-indigo-500/15 lg:grid"
+                >
+                  <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-5 w-5">
+                    <rect x="3" y="4" width="18" height="16" rx="2" />
+                    <path d="M9 4v16" />
+                    <path d={sidebar.collapsed ? "m13 9 3 3-3 3" : "m16 9-3 3 3 3"} />
+                  </svg>
+                </button>
                 <button
                   type="button"
                   aria-label="Nuevo grupo"
-                  onClick={() => setShowNewGroup(true)}
+                  title="Nuevo grupo"
+                  onClick={openNewGroup}
                   class="grid h-9 w-9 place-items-center rounded-full bg-transparent text-slate-600 transition-colors hover:bg-indigo-50 hover:text-indigo-600 dark:text-slate-300 dark:hover:bg-indigo-500/15 dark:hover:text-indigo-400"
                 >
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-5 w-5">
@@ -190,7 +222,8 @@ export function ChatView({ user, targetId, onConsumeTarget }: ChatViewProps) {
                 <button
                   type="button"
                   aria-label="Nueva conversación"
-                  onClick={() => setShowNewChat(true)}
+                  title="Nueva conversación"
+                  onClick={openNewChat}
                   class="grid h-9 w-9 place-items-center rounded-full bg-indigo-600 text-white shadow-sm transition-colors hover:bg-indigo-700"
                 >
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-5 w-5">
@@ -208,11 +241,29 @@ export function ChatView({ user, targetId, onConsumeTarget }: ChatViewProps) {
             />
           </>
         )}
+        {!showNewChat && !showNewGroup ? (
+          <div
+            {...sidebar.separatorProps}
+            role="separator"
+            tabIndex={0}
+            aria-label="Ancho de la lista de chats"
+            aria-controls="chat-sidebar"
+            aria-orientation="vertical"
+            aria-valuemin={80}
+            aria-valuemax={sidebar.maxWidth}
+            aria-valuenow={sidebar.width}
+            aria-valuetext={sidebar.collapsed ? "Solo avatares" : `${sidebar.width} píxeles`}
+            title="Arrastra para ajustar el ancho. Doble clic para contraer o expandir."
+            class={"absolute inset-y-0 -right-1 z-50 hidden w-2 cursor-col-resize touch-none items-center justify-center outline-none hover:bg-indigo-500/15 focus-visible:bg-indigo-500/20 lg:flex " + (sidebar.resizing ? "bg-indigo-500/20" : "")}
+          >
+            <span aria-hidden="true" class="h-10 w-0.5 rounded-full bg-slate-300 dark:bg-slate-600" />
+          </div>
+        ) : null}
       </aside>
 
-<section
+      <section
         class={
-          "min-h-0 flex-col overflow-hidden bg-slate-50 dark:bg-slate-900 " +
+          "min-h-0 min-w-0 flex-col overflow-hidden bg-slate-50 dark:bg-slate-900 " +
             (panelOpen
               ? "absolute inset-0 z-40 flex lg:static lg:z-auto lg:flex-1"
               : "hidden lg:flex lg:flex-1 lg:items-center lg:justify-center")
@@ -244,7 +295,7 @@ export function ChatView({ user, targetId, onConsumeTarget }: ChatViewProps) {
             {!showNewChat ? (
               <button
                 type="button"
-                onClick={() => setShowNewChat(true)}
+                onClick={openNewChat}
                 class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700"
               >
                 Nueva conversación

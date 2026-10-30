@@ -26,7 +26,8 @@ export function splitLinks(text: string): LinkSegment[] {
     }
     segments.push({ text: url, url });
 
-    lastIndex = start + raw.length;
+    // Leave punctuation in the text so formatting offsets remain accurate.
+    lastIndex = start + url.length;
   }
 
   if (lastIndex < text.length) {

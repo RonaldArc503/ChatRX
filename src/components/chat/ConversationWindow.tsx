@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import {
   deleteMessage,
   editMessage,
@@ -51,9 +51,13 @@ import { peerOf } from "./ConversationList";
 import { ForwardSheet } from "./ForwardSheet";
 import { GroupInfoSheet } from "./GroupInfoSheet";
 import { extractMentions, mentionContacts } from "./mention";
-import { MessageActionsSheet } from "./MessageActionsSheet";
+import { MessageActionsSheet, type MessageMenuAnchor } from "./MessageActionsSheet";
 import { MessageBubble } from "./MessageBubble";
+import { ThreadPanel, type ThreadDraft } from "./ThreadPanel";
+import { buildMessageThreads, sameMessageDelivery } from "../../lib/chatThreads";
 import { formatDayLabel, formatLastSeen, sameDay } from "./time";
+import { trimFormattedText, type TextFormat } from "../../lib/messageFormatting";
+import { MessageTextEditor, type MessageEditorHandle } from "./MessageTextEditor";
 
 interface AttachmentDraft {
   id: string;
@@ -83,9 +87,7 @@ function mergePendingMessages(
   const merged = [...real];
   for (const pm of pendingMsgs) {
     if (realIds.has(pm.id)) continue;
-    const duplicated = real.some(
-      (m) => m.senderId === pm.senderId && m.text === pm.text,
-    );
+    const duplicated = real.some((m) => sameMessageDelivery(m, pm));
     if (duplicated) {
       removePending(pm.id).catch(() => {});
       continue;
@@ -103,10 +105,35 @@ export function ConversationWindow({
   conversations,
   onBack,
 }: ConversationWindowProps) {
+  const [desktop, setDesktop] = useState(false);
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 1024px)");
+    const update = () => setDesktop(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [text, setText] = useState("");
+  const [formatting, setFormatting] = useState<TextFormat[]>([]);
   const [sendError, setSendError] = useState<string | null>(null);
   const [menuMsg, setMenuMsg] = useState<ChatMessage | null>(null);
+  const [menuAnchor, setMenuAnchor] = useState<MessageMenuAnchor | null>(null);
+  const [menuScope, setMenuScope] = useState<"main" | "thread">("main");
+  const [threadRootId, setThreadRootId] = useState<string | null>(null);
+  const [threadDrafts, setThreadDrafts] = useState<Record<string, ThreadDraft>>({});
+  const [inlineEditing, setInlineEditing] = useState<{ id: string; scope: "main" | "thread" } | null>(null);
+  const [threadFocus, setThreadFocus] = useState(0);
+  const [threadBusy, setThreadBusy] = useState(false);
+  const [threadDocked, setThreadDocked] = useState(false);
+  const layoutRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const layout = layoutRef.current;
+    if (!layout) return;
+    const observer = new ResizeObserver(() => setThreadDocked(layout.clientWidth >= 800));
+    observer.observe(layout);
+    return () => observer.disconnect();
+  }, []);
   const [forwardMsg, setForwardMsg] = useState<ChatMessage | null>(null);
   const [editing, setEditing] = useState<ChatMessage | null>(null);
   const [replyMsg, setReplyMsg] = useState<ChatMessage | null>(null);
@@ -134,12 +161,13 @@ export function ConversationWindow({
   const contentRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
   const entryPending = useRef(false);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const inputRef = useRef<MessageEditorHandle | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastTypingSent = useRef(0);
   const flushing = useRef(false);
   const lastScrollH = useRef<number | null>(null);
   const NEAR_BOTTOM_PX = 120;
+  const visibleMessagesRef = useRef<ChatMessage[]>([]);
 
 let coarsePointer: boolean | null = null;
 function isCoarsePointer(): boolean {
@@ -256,6 +284,7 @@ function isCoarsePointer(): boolean {
   }
 
   useEffect(() => {
+    setMessages([]);
     return subscribeMessages(conv.id, setMessages);
   }, [conv.id]);
 
@@ -278,8 +307,8 @@ function isCoarsePointer(): boolean {
   }, [conv.id]);
 
   useEffect(() => {
-    markConversationRead(conv.id, me.uid);
-  }, [messages, conv.id, me.uid]);
+    if ((conv.unread?.[me.uid] ?? 0) > 0) markConversationRead(conv.id, me.uid);
+  }, [conv.id, conv.unread?.[me.uid], me.uid]);
 
   useEffect(() => {
     let active = true;
@@ -311,6 +340,7 @@ function isCoarsePointer(): boolean {
             undefined,
             pm.mentions,
             pm.forwardedFrom ?? null,
+            pm.formatting,
           ),
         );
       }
@@ -347,13 +377,18 @@ function isCoarsePointer(): boolean {
       const cur = el.clientHeight;
       const prev = lastScrollH.current;
       lastScrollH.current = cur;
+      if (stickRef.current) {
+        scrollToAbsoluteEnd();
+        return;
+      }
       if (prev === null || prev === cur) return;
       const max = Math.max(0, el.scrollHeight - el.clientHeight);
       el.scrollTop = Math.max(0, Math.min(el.scrollTop + (prev - cur), max));
     });
     ro.observe(el);
+    if (contentRef.current) ro.observe(contentRef.current);
     return () => ro.disconnect();
-  }, []);
+  }, [desktop, messages.length > 0]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -382,10 +417,13 @@ function isCoarsePointer(): boolean {
 
   useEffect(() => {
     setEditing(null);
+    setThreadRootId(null);
+    setInlineEditing(null);
+    setThreadBusy(false);
     setMenuMsg(null);
     setForwardMsg(null);
     setReplyMsg(null);
-    setText("");
+    setText(""); setFormatting([]);
     setSendError(null);
     setLightbox(null);
     setHighlightedId(null);
@@ -402,7 +440,6 @@ function isCoarsePointer(): boolean {
   useEffect(() => {
     if (editing && inputRef.current) {
       inputRef.current.focus();
-      autoGrow(inputRef.current);
     }
   }, [editing]);
 
@@ -439,11 +476,6 @@ function isCoarsePointer(): boolean {
     return `${names[0]} y ${typingUids.length - 1} más están escribiendo…`;
   })();
 
-  function autoGrow(el: HTMLTextAreaElement) {
-    el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, 128) + "px";
-  }
-
   function isNearBottom(el: HTMLDivElement): boolean {
     return el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
   }
@@ -467,14 +499,21 @@ function isCoarsePointer(): boolean {
   }
 
   function scrollToMessage(msgId: string) {
+    const root = threads.rootById.get(msgId);
+    if (desktop && root && root !== msgId) {
+      setThreadRootId(root);
+      setThreadFocus((value) => value + 1);
+      highlightMessage(msgId);
+      return;
+    }
     const el = scrollRef.current;
     if (!el) return;
     const target = el.querySelector<HTMLElement>(
       `[data-message-id="${CSS.escape(msgId)}"]`,
     );
+    if (!target) return;
     stickRef.current = false;
     setShowJump(false);
-    if (!target) return;
 
     const containerRect = el.getBoundingClientRect();
     const targetRect = target.getBoundingClientRect();
@@ -487,6 +526,10 @@ function isCoarsePointer(): boolean {
       top: el.scrollTop + delta,
       behavior: "smooth",
     });
+    highlightMessage(msgId);
+  }
+
+  function highlightMessage(msgId: string) {
     setHighlightedId(msgId);
     if (highlightTimer.current !== null) window.clearTimeout(highlightTimer.current);
     highlightTimer.current = window.setTimeout(() => {
@@ -723,38 +766,20 @@ function isCoarsePointer(): boolean {
   }
 
   function insertNewline() {
-    const el = inputRef.current;
-    if (!el) return;
-    const start = el.selectionStart ?? text.length;
-    const end = el.selectionEnd ?? start;
-    const updated = text.slice(0, start) + "\n" + text.slice(end);
-    el.value = updated;
-    setText(updated);
-    requestAnimationFrame(() => {
-      el.focus();
-      const pos = start + 1;
-      el.setSelectionRange(pos, pos);
-      autoGrow(el);
-    });
+    inputRef.current?.insertText("\n");
   }
 
   function insertMention(name: string) {
-    const el = inputRef.current;
-    if (!el) return;
-    const start = el.selectionStart ?? text.length;
-    const updated = text.slice(0, start) + "@" + name + " " + text.slice(start);
-    el.value = updated;
-    setText(updated);
+    const input = inputRef.current;
+    if (!input) return;
+    const before = input.value.slice(0, input.selectionStart);
+    const at = before.lastIndexOf("@");
+    if (at >= 0 && !before.slice(at).includes("\n")) input.setSelectionRange(at, input.selectionEnd);
+    input.insertText("@" + name + " ");
     setMentionOpen(false);
-    requestAnimationFrame(() => {
-      el.focus();
-      const pos = start + name.length + 2;
-      el.setSelectionRange(pos, pos);
-      autoGrow(el);
-    });
   }
 
-  function updateMentionAutocomplete(el: HTMLTextAreaElement) {
+  function updateMentionAutocomplete(el: MessageEditorHandle) {
     if (!isGroup) {
       setMentionOpen(false);
       return;
@@ -777,7 +802,8 @@ function isCoarsePointer(): boolean {
   }
 
   async function handleSubmit() {
-    const value = text.trim();
+    inputRef.current?.focus({ preventScroll: true });
+    const { text: value, formatting: sendFormatting } = trimFormattedText(text, formatting);
     const onlineNow = isOnline();
     setSendError(null);
     clearTyping(conv.id, me.uid);
@@ -789,10 +815,10 @@ function isCoarsePointer(): boolean {
         return;
       }
       try {
-        await editMessage(conv.id, editing.id, value);
+        await editMessage(conv.id, editing.id, value, sendFormatting);
         setEditing(null);
-        setText("");
-        if (inputRef.current) inputRef.current.style.height = "auto";
+        setText(""); setFormatting([]);
+
       } catch (err) {
         setSendError(
           err instanceof Error ? err.message : "No se pudo editar el mensaje.",
@@ -853,10 +879,12 @@ function isCoarsePointer(): boolean {
             reply,
             allAtts,
             mentionedIds,
+            null,
+            sendFormatting,
           );
         } else {
           if (value) {
-            await sendMessage(conv.id, me.uid, value, reply, undefined, mentionedIds);
+            await sendMessage(conv.id, me.uid, value, reply, undefined, mentionedIds, null, sendFormatting);
           }
           for (let i = 0; i < allAtts.length; i++) {
             await sendMessage(
@@ -872,10 +900,10 @@ function isCoarsePointer(): boolean {
         clearDraftUrls();
         setPendingFiles([]);
         setReplyMsg(null);
-        setText("");
+        setText(""); setFormatting([]);
         stickRef.current = true;
         setShowJump(false);
-        if (inputRef.current) inputRef.current.style.height = "auto";
+
       } catch (err) {
         setSendError(err instanceof Error ? err.message : "No se pudo enviar.");
       }
@@ -889,6 +917,7 @@ function isCoarsePointer(): boolean {
         convId: conv.id,
         senderId: me.uid,
         text: value,
+        formatting: sendFormatting,
         createdAt: Date.now(),
         replyTo: replyMsg
           ? {
@@ -902,13 +931,13 @@ function isCoarsePointer(): boolean {
       await enqueuePending(pm);
       setPending((prev) => [...prev, pm]);
       setReplyMsg(null);
-      setText("");
+      setText(""); setFormatting([]);
       stickRef.current = true;
       setShowJump(false);
-      if (inputRef.current) inputRef.current.style.height = "auto";
+
       return;
     }
-    setText("");
+    setText(""); setFormatting([]);
     stickRef.current = true;
     setShowJump(false);
     try {
@@ -925,11 +954,10 @@ function isCoarsePointer(): boolean {
           : null,
         undefined,
         mentionedIds,
+        null,
+        sendFormatting,
       );
       setReplyMsg(null);
-      if (inputRef.current) {
-        inputRef.current.style.height = "auto";
-      }
     } catch (err) {
       setSendError(err instanceof Error ? err.message : "No se pudo enviar.");
     }
@@ -937,15 +965,77 @@ function isCoarsePointer(): boolean {
 
   function handleEdit(m: ChatMessage) {
     setMenuMsg(null);
+    if (desktop) {
+      setInlineEditing({ id: m.id, scope: menuScope === "thread" && threadRootId ? "thread" : "main" });
+      return;
+    }
     setReplyMsg(null);
     setEditing(m);
     setText(m.text);
+    setFormatting(m.formatting ?? []);
+  }
+
+  function focusComposer(scope: "main" | "thread") {
+    requestAnimationFrame(() => {
+      const input = scope === "thread"
+        ? document.querySelector<HTMLElement>('#chat-thread-panel [role="textbox"][aria-label="Respuesta en el hilo"]')
+        : inputRef.current;
+      input?.focus({ preventScroll: true });
+    });
+  }
+
+  function cancelInlineEdit(scope: "main" | "thread") {
+    setInlineEditing(null);
+    focusComposer(scope);
+  }
+
+  async function saveInlineEdit(message: ChatMessage, value: string, scope: "main" | "thread", marks: TextFormat[]) {
+    if (!isOnline()) throw new Error("Conéctate a internet para editar el mensaje.");
+    if (message.pending) throw new Error("Espera a que el mensaje se sincronice para editarlo.");
+    if (!visibleMessagesRef.current.some((current) => current.id === message.id)) throw new Error("El mensaje ya no está disponible.");
+    await editMessage(conv.id, message.id, value, marks);
+    const active = document.activeElement;
+    const restoreFocus = active === document.body || active?.closest("[data-inline-editor]")?.getAttribute("data-inline-editor") === message.id;
+    setInlineEditing((current) => current?.id === message.id && current.scope === scope ? null : current);
+    if (restoreFocus) focusComposer(scope);
   }
 
   function handleReply(m: ChatMessage) {
     setMenuMsg(null);
+    if (desktop) {
+      openThread(m);
+      return;
+    }
     setEditing(null);
     setReplyMsg(m);
+  }
+
+  function openThread(message: ChatMessage) {
+    if (threadBusy) return;
+    if (message.pending) {
+      setSendError("Espera a que el mensaje se sincronice para abrir su hilo.");
+      return;
+    }
+    const root = threads.rootById.get(message.id) ?? message.id;
+    if (root !== threadRootId && inlineEditing?.scope === "thread") setInlineEditing(null);
+    setThreadRootId(root);
+    setThreadFocus((value) => value + 1);
+  }
+
+  async function sendThreadReply(rootId: string, value: string, attachments: ChatAttachment[], marks: TextFormat[]) {
+    const root = visibleMessagesRef.current.find((message) => message.id === rootId);
+    if (!root || root.pending) throw new Error("El mensaje original ya no está disponible.");
+    const reply = { id: root.id, text: root.text, senderId: root.senderId };
+    const mentions = isGroup ? extractMentions(value, members) : [];
+    if (!isOnline()) {
+      if (attachments.length) throw new Error("Conéctate a internet para enviar archivos.");
+      const queued: PendingMessage = { localId: newLocalId(), convId: conv.id, senderId: me.uid,
+        text: value, formatting: marks, createdAt: Date.now(), replyTo: reply, mentions };
+      await enqueuePending(queued);
+      setPending((previous) => [...previous, queued]);
+      return;
+    }
+    await sendMessage(conv.id, me.uid, value, reply, attachments.length ? attachments : undefined, mentions, null, marks);
   }
 
   async function handleReact(m: ChatMessage, emoji: string) {
@@ -957,6 +1047,24 @@ function isCoarsePointer(): boolean {
         err instanceof Error ? err.message : "No se pudo reaccionar.",
       );
     }
+  }
+
+  const [deletedForMeIds, setDeletedForMeIds] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(`deleted_for_me_${me.uid}`);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  function handleDeleteForMe(m: ChatMessage) {
+    setMenuMsg(null);
+    const updated = [...deletedForMeIds, m.id];
+    setDeletedForMeIds(updated);
+    try {
+      localStorage.setItem(`deleted_for_me_${me.uid}`, JSON.stringify(updated));
+    } catch {}
   }
 
   async function handleDelete(m: ChatMessage) {
@@ -989,7 +1097,7 @@ function isCoarsePointer(): boolean {
     }
   }
 
-  const pendingForConv = pending
+  const pendingForConv = useMemo(() => pending
     .filter((p) => p.convId === conv.id)
     .map((p): ChatMessage => ({
       id: p.localId,
@@ -1000,19 +1108,36 @@ function isCoarsePointer(): boolean {
       mentions: p.mentions,
       forwardedFrom: p.forwardedFrom ?? null,
       pending: true,
-    }));
+      formatting: p.formatting,
+    })), [pending, conv.id]);
 
-  const displayMessages = mergePendingMessages(messages, pendingForConv);
+  const displayMessages = useMemo(() => mergePendingMessages(messages, pendingForConv).filter(
+    (m) => !deletedForMeIds.includes(m.id),
+  ), [messages, pendingForConv, deletedForMeIds]);
+  visibleMessagesRef.current = displayMessages;
+  const threads = useMemo(() => buildMessageThreads(displayMessages), [displayMessages]);
+  const timeline = desktop ? threads.timeline : displayMessages;
+  const threadRoot = desktop ? displayMessages.find((message) => message.id === threadRootId) ?? null : null;
+  const threadKey = `${me.uid}:${conv.id}:${threadRoot?.id ?? ""}`;
+
+  useEffect(() => {
+    if (threadRootId && !displayMessages.some((message) => message.id === threadRootId)) {
+      setThreadRootId(null);
+      if (inlineEditing?.scope === "thread") setInlineEditing(null);
+    }
+  }, [displayMessages, threadRootId]);
 
   const items: preact.ComponentChildren[] = [];
-  displayMessages.forEach((msg, i) => {
-    const previous = displayMessages[i - 1];
+  timeline.forEach((msg, i) => {
+    const previous = timeline[i - 1];
     if (!previous || !sameDay(previous.createdAt, msg.createdAt)) {
       items.push(
-        <div key={"day-" + msg.id} class="flex justify-center py-2.5">
-          <span class="rounded-full border border-slate-200/80 bg-white/90 px-3 py-1 text-[11px] font-semibold text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-800/90 dark:text-slate-400">
+        <div key={"day-" + msg.id} class="flex shrink-0 items-center justify-center gap-4 py-2.5 lg:sticky lg:top-0 lg:z-10 lg:bg-white lg:px-6 lg:dark:bg-slate-900">
+          <span aria-hidden="true" class="hidden h-px flex-1 bg-slate-200 dark:bg-slate-800 lg:block" />
+          <span class="rounded-full border border-slate-200/80 bg-white/90 px-3 py-1 text-[11px] font-semibold text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-800/90 dark:text-slate-400 lg:px-4 lg:text-sm">
             {formatDayLabel(msg.createdAt)}
           </span>
+          <span aria-hidden="true" class="hidden h-px flex-1 bg-slate-200 dark:bg-slate-800 lg:block" />
         </div>,
       );
     }
@@ -1022,15 +1147,25 @@ function isCoarsePointer(): boolean {
         msg={msg}
         mine={msg.senderId === me.uid}
         uid={me.uid}
-        onOpenMenu={setMenuMsg}
+        onOpenMenu={(message, anchor) => { setMenuScope("main"); setMenuAnchor(anchor ?? null); setMenuMsg(message); }}
         onReact={handleReact}
         onOpenAttachment={openLightbox}
         onJumpToReply={scrollToMessage}
         isPinned={conv.pinnedMessages?.some((p) => p.id === msg.id) ?? false}
         highlighted={highlightedId === msg.id}
         showAuthor={isGroup && msg.senderId !== me.uid}
-        authorName={members[msg.senderId]?.displayName}
-        members={isGroup ? members : undefined}
+        authorName={members[msg.senderId]?.displayName || (msg.senderId === me.uid ? me.displayName : peer.name)}
+        authorPhotoURL={members[msg.senderId]?.photoURL || (msg.senderId === me.uid ? me.photoURL : peer.photoURL)}
+        desktop={desktop}
+        grouped={!!previous && previous.senderId === msg.senderId && sameDay(previous.createdAt, msg.createdAt) && msg.createdAt - previous.createdAt >= 0 && msg.createdAt - previous.createdAt < 5 * 60_000 && !msg.replyTo && !msg.forwardedFrom}
+        onReply={handleReply}
+        editing={desktop && inlineEditing?.scope === "main" && inlineEditing.id === msg.id}
+        onSaveEdit={(message, value, marks) => saveInlineEdit(message, value, "main", marks)}
+        onCancelEdit={() => cancelInlineEdit("main")}
+        threadReplies={desktop ? threads.repliesByRoot.get(msg.id) : undefined}
+        onOpenThread={() => openThread(msg)}
+        threadSelected={threadRoot?.id === msg.id}
+        members={members}
       />,
     );
   });
@@ -1048,14 +1183,16 @@ function isCoarsePointer(): boolean {
   }
 
   return (
+    <div ref={layoutRef} data-thread-docked={threadDocked ? "true" : "false"} class="chat-conversation-layout relative flex min-h-0 min-w-0 flex-1">
     <div
-      class="flex min-h-0 flex-1 flex-col"
+      class="relative flex min-h-0 min-w-0 flex-1 flex-col"
+      inert={threadRoot && !threadDocked ? true : undefined}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <header class="flex items-center gap-3 border-b border-slate-200 bg-white px-3 py-2.5 dark:border-slate-800 dark:bg-slate-900">
+      <header class="chat-conversation-header flex shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-3 py-2.5 dark:border-slate-800 dark:bg-slate-900 lg:min-h-[88px] lg:px-6 lg:py-4">
         <button
           type="button"
           aria-label="Volver a la lista"
@@ -1068,11 +1205,11 @@ function isCoarsePointer(): boolean {
           </svg>
         </button>
         {isGroup ? (
-          <span class="flex-none">
+          <span class="chat-header-avatar flex-none">
             <GroupAvatar name={conv.name || "Grupo"} size="sm" />
           </span>
         ) : (
-          <span class="relative flex-none">
+          <span class="chat-header-avatar relative flex-none">
             <Avatar uid={peer.uid} name={peer.name} photoURL={peer.photoURL} size="sm" />
             {isOnlineNow(peerPresence) && !peer.isSelf ? (
               <span
@@ -1087,7 +1224,7 @@ function isCoarsePointer(): boolean {
           class="min-w-0 flex-1 truncate text-left"
           onClick={() => (isGroup ? setShowGroupInfo(true) : undefined)}
         >
-          <span class="block truncate text-sm font-bold text-slate-800 dark:text-slate-100">
+          <span class="block truncate text-sm font-bold text-slate-800 dark:text-slate-100 lg:text-[15px]">
             {peer.name}
           </span>
           {isGroup ? (
@@ -1229,7 +1366,7 @@ function isCoarsePointer(): boolean {
 
       <div class="relative min-h-0 flex-1">
         <div
-          class="chat-bg h-full overflow-y-auto px-3 py-4"
+          class="chat-scroll chat-bg h-full overflow-x-hidden overflow-y-auto px-3 py-4 lg:px-0 lg:py-0"
           ref={scrollRef}
           onScroll={handleScroll}
         >
@@ -1243,7 +1380,7 @@ function isCoarsePointer(): boolean {
               </p>
             </div>
           ) : (
-            <div ref={contentRef} class="flex flex-col gap-2">{items}</div>
+            <div ref={contentRef} class="flex flex-col gap-2 lg:min-h-full lg:justify-end lg:gap-0">{items}</div>
           )}
         </div>
 
@@ -1298,8 +1435,8 @@ function isCoarsePointer(): boolean {
             type="button"
             onClick={() => {
               setEditing(null);
-              setText("");
-              if (inputRef.current) inputRef.current.style.height = "auto";
+              setText(""); setFormatting([]);
+
             }}
             class="rounded-lg px-2 py-1 text-xs font-semibold text-amber-700 transition-colors hover:bg-amber-100 dark:text-amber-400 dark:hover:bg-amber-500/20"
           >
@@ -1448,7 +1585,7 @@ function isCoarsePointer(): boolean {
         </div>
       ) : null}
 
-      <form class="flex items-end gap-1.5 border-t border-slate-200 bg-white px-2 py-2.5 dark:border-slate-800 dark:bg-slate-900" onSubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
+      <form class="chat-composer shrink-0 border-t border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900 lg:mx-6 lg:mb-4 lg:mt-3 lg:rounded-xl lg:border lg:shadow-sm lg:focus-within:border-indigo-400 lg:focus-within:ring-2 lg:focus-within:ring-indigo-500/15" onSubmit={(e) => { e.preventDefault(); void handleSubmit(); }}>
         <input
           ref={fileInputRef}
           type="file"
@@ -1457,6 +1594,18 @@ function isCoarsePointer(): boolean {
           class="hidden"
           onChange={handleFilesChange}
         />
+        <MessageTextEditor editorRef={inputRef} value={text} formatting={formatting}
+          label={editing ? "Editar mensaje" : "Mensaje"}
+          placeholder={editing ? "Editar mensaje…" : desktop ? `Mensaje a ${peer.name}…` : "Escribe un mensaje…"}
+          className="text-slate-800 dark:text-slate-100"
+          readOnly={uploading}
+          onChange={(value, marks, input) => {
+            setText(value); setFormatting(marks);
+            bumpTyping(value.trim().length > 0);
+            updateMentionAutocomplete(input);
+          }}
+          onKeyDown={handleKeyDown} onPaste={handlePaste}
+          footerStart={<>
         <button
           type="button"
           aria-label="Adjuntar archivo"
@@ -1471,28 +1620,14 @@ function isCoarsePointer(): boolean {
             <path d="m9 15 3 3 3-3" />
           </svg>
         </button>
-        <div class="relative flex min-w-0 flex-1 items-end overflow-hidden rounded-3xl border border-slate-200 bg-slate-50 transition-colors focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-200 dark:border-slate-700 dark:bg-slate-800 dark:focus-within:border-indigo-500">
-          <textarea
-            ref={inputRef}
-            rows={1}
-            value={text}
-            placeholder={editing ? "Editar mensaje…" : "Escribe un mensaje…"}
-            class="no-scrollbar max-h-32 w-full resize-none bg-transparent px-4 py-2.5 pr-2 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder:text-slate-500"
-            onInput={(e) => {
-              const el = e.target as HTMLTextAreaElement;
-              setText(el.value);
-              bumpTyping(el.value.trim().length > 0);
-              autoGrow(el);
-              updateMentionAutocomplete(el);
-            }}
-            onKeyDown={handleKeyDown}
-            onPaste={handlePaste}
-          />
+          </>} footerEnd={<>
+            <span class="hidden min-w-0 flex-1 px-2 text-xs text-slate-400 dark:text-slate-500 lg:block">Enter para enviar · Shift + Enter para una nueva línea</span>
           <button
             type="submit"
+            onPointerDown={(event) => event.preventDefault()}
             disabled={uploading || (!text.trim() && pendingFiles.length === 0)}
             aria-label={editing ? "Guardar edición" : "Enviar mensaje"}
-            class="mb-1.5 mr-1.5 grid h-9 w-9 flex-none place-items-center rounded-full bg-indigo-600 text-white shadow-sm transition-colors hover:bg-indigo-700 disabled:opacity-40"
+            class="ml-auto grid h-10 w-10 flex-none place-items-center rounded-full bg-indigo-600 text-white shadow-sm transition-colors hover:bg-indigo-700 disabled:opacity-40 lg:h-11 lg:w-11 lg:rounded-lg"
           >
             {editing ? (
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-4.5 w-4.5">
@@ -1506,7 +1641,7 @@ function isCoarsePointer(): boolean {
               </svg>
             )}
           </button>
-        </div>
+          </>} />
       </form>
 
       {sendError ? (
@@ -1514,15 +1649,31 @@ function isCoarsePointer(): boolean {
           {sendError}
         </p>
       ) : null}
+    </div>
+    {threadRoot ? <ThreadPanel key={`${conv.id}:${threadRoot.id}`} root={threadRoot}
+      replies={threads.repliesByRoot.get(threadRoot.id) ?? []} me={me} members={members}
+      pinnedIds={pinnedList.map((message) => message.id)} focusToken={threadFocus} highlightedId={highlightedId}
+      editingId={inlineEditing?.scope === "thread" ? inlineEditing.id : null}
+      onSaveEdit={(message, value, marks) => saveInlineEdit(message, value, "thread", marks)} onCancelEdit={() => cancelInlineEdit("thread")}
+      draft={threadDrafts[threadKey] ?? { text: "", files: [] }}
+      onDraftChange={(draft) => setThreadDrafts((previous) => ({ ...previous, [threadKey]: draft }))}
+      onBusyChange={setThreadBusy}
+      onClose={() => { if (threadBusy) return; setThreadRootId(null); if (inlineEditing?.scope === "thread") setInlineEditing(null); focusComposer("main"); }}
+      onSend={(value, attachments, marks) => sendThreadReply(threadRoot.id, value, attachments, marks)}
+      onOpenMenu={(message, anchor) => { setMenuScope("thread"); setMenuAnchor(anchor ?? null); setMenuMsg(message); }}
+      onReact={handleReact} onOpenAttachment={openLightbox} /> : null}
 
       <MessageActionsSheet
         msg={menuMsg}
+        desktop={desktop}
+        anchor={menuAnchor}
         mine={menuMsg !== null && menuMsg.senderId === me.uid}
         uid={me.uid}
         isPinned={(menuMsg !== null && conv.pinnedMessages?.some((p) => p.id === menuMsg.id)) || false}
         onClose={() => setMenuMsg(null)}
         onEdit={handleEdit}
         onDelete={handleDelete}
+        onDeleteForMe={handleDeleteForMe}
         onReply={handleReply}
         onReact={handleReact}
         onPin={handlePin}

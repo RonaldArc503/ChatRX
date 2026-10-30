@@ -1,10 +1,12 @@
 import type { ForwardedFrom, ReplyInfo } from "./chat";
+import type { TextFormat } from "./messageFormatting";
 
 export interface PendingMessage {
   localId: string;
   convId: string;
   senderId: string;
   text: string;
+  formatting?: TextFormat[];
   createdAt: number;
   replyTo?: ReplyInfo | null;
   mentions?: string[];

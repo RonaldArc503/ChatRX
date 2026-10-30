@@ -75,9 +75,9 @@ service cloud.firestore {
               && request.resource.data.senderId == resource.data.senderId
               && request.resource.data.createdAt == resource.data.createdAt)
           );
+        // Cualquier participante de la conversación puede eliminar mensajes (estilo Telegram)
         allow delete: if request.auth != null
-          && request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participantIds
-          && request.auth.uid == resource.data.senderId;
+          && request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participantIds;
       }
     }
   }

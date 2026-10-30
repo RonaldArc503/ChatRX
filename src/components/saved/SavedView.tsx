@@ -368,16 +368,6 @@ function SavedCard({
               {others.length === 1 ? others[0].name : `${others.length} archivos`}
             </span>
           ) : null}
-
-          <div class="mt-2.5 flex items-center gap-2 text-[11px] text-slate-400 dark:text-slate-500">
-            <span class="truncate font-semibold text-slate-500 dark:text-slate-400">
-              {item.senderName || "Desconocido"}
-            </span>
-            <span aria-hidden="true">·</span>
-            <span class="truncate">{item.convName}</span>
-            <span aria-hidden="true">·</span>
-            <span class="flex-none tabular-nums">{formatDayLabel(item.savedAt)}</span>
-          </div>
         </div>
 
         <div class="flex flex-none items-center gap-1.5">

@@ -172,13 +172,14 @@ export function AppRoot() {
         </div>
       ) : null}
 
-      <BottomNav view={view} onNavigate={setView} />
+      <BottomNav view={view} onNavigate={setView} profile={user} />
 
+      <div class="lg:pl-[var(--app-rail-w)]">
       <main
         class={
           view === "chat"
             ? "w-full"
-            : "mx-auto w-full max-w-5xl px-4 pb-28 pt-[calc(var(--audio-bar-h)+1.5rem)] sm:px-6 lg:pb-12 lg:pt-[calc(var(--audio-bar-h)+2.5rem)]"
+            : "mx-auto w-full max-w-6xl px-4 pb-28 pt-[calc(var(--audio-bar-h)+1.5rem)] sm:px-6 lg:px-8 lg:pb-12 lg:pt-[calc(var(--audio-bar-h)+2.5rem)]"
         }
       >
         {view === "home" ? (
@@ -212,6 +213,7 @@ export function AppRoot() {
         {view === "reminders" ? <RemindersView user={user} /> : null}
         {view === "profile" ? <ProfileView user={user} onLogout={handleLogout} /> : null}
       </main>
+      </div>
     </div>
   );
 }

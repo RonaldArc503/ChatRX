@@ -61,6 +61,7 @@ export function ForwardSheet({
           msg.attachments,
           mentions,
           forwardedFrom,
+          msg.formatting,
         );
       }
       onSent();

@@ -87,7 +87,7 @@ export function ConversationList({
   }
 
   return (
-    <ul class="flex-1 overflow-y-auto">
+    <ul class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto" aria-label="Lista de chats">
       {conversations.map((conv) => {
         const peer = peerOf(conv, uid);
         const unread = conv.unread?.[uid] ?? 0;
@@ -107,14 +107,17 @@ export function ConversationList({
             <button
               type="button"
               class={
-                "flex w-full items-center gap-3 px-4 py-3 text-left transition-colors " +
+                "chat-sidebar-row flex w-full items-center gap-3 px-4 py-3 text-left transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500 " +
                 (active
                   ? "bg-indigo-50 dark:bg-indigo-500/15"
                   : "hover:bg-slate-50 dark:hover:bg-slate-800/60")
               }
+              aria-label={`${peer.name}${unread > 0 ? `, ${unread} mensajes sin leer` : ""}`}
+              aria-current={active ? "true" : undefined}
+              title={peer.name}
               onClick={() => onSelect(conv.id)}
             >
-              <span class="relative flex-none">
+              <span class="chat-list-avatar relative flex-none">
                 {peer.isGroup ? (
                   <GroupAvatar name={peer.name} />
                 ) : (
@@ -128,20 +131,25 @@ export function ConversationList({
                     ) : null}
                   </>
                 )}
+                {unread > 0 ? (
+                  <span aria-hidden="true" class="chat-sidebar-unread absolute -right-2 -top-1 hidden h-5 min-w-5 place-items-center rounded-full bg-indigo-600 px-1 text-[10px] font-bold text-white ring-2 ring-white dark:ring-slate-900">
+                    {unread > 99 ? "99+" : unread}
+                  </span>
+                ) : null}
               </span>
-              <span class="min-w-0 flex-1">
+              <span class="chat-sidebar-details min-w-0 flex-1">
                 <span class="flex items-baseline justify-between gap-2">
-                  <span class="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  <span class="truncate text-sm font-semibold text-slate-800 dark:text-slate-100 lg:text-[15px]">
                     {peer.name}
                   </span>
-                  <span class="flex-none text-[11px] text-slate-400 dark:text-slate-500">
+                  <span class="flex-none text-[11px] text-slate-400 dark:text-slate-500 lg:text-xs">
                     {formatTime(conv.lastMessageAt)}
                   </span>
                 </span>
                 <span class="mt-0.5 flex items-center justify-between gap-2">
                   <span
                     class={
-                      "truncate text-xs " +
+                      "truncate text-xs lg:text-[15px] " +
                       (unread > 0
                         ? "font-semibold text-slate-700 dark:text-slate-200"
                         : "text-slate-500 dark:text-slate-400")

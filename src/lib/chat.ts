@@ -20,6 +20,8 @@ import {
 } from "firebase/firestore";
 import { db } from "./firebase";
 import type { UserProfile } from "./profile";
+import { markConversationReadOnce, sendConversationMessage } from "./chatMessageWrites";
+import { trimFormattedText, type TextFormat } from "./messageFormatting";
 
 export interface MemberSnapshot {
   displayName: string;
@@ -73,6 +75,7 @@ export interface ChatMessage {
   id: string;
   senderId: string;
   text: string;
+  formatting?: TextFormat[];
   createdAt: number;
   edited?: boolean;
   editedAt?: number;
@@ -295,66 +298,13 @@ export async function sendMessage(
   attachments?: ChatAttachment[],
   mentions?: string[],
   forwardedFrom?: ForwardedFrom | null,
+  formatting?: TextFormat[],
 ): Promise<void> {
-  const clean = text.trim();
-  if (!clean && (!attachments || attachments.length === 0)) return;
-  const convRef = doc(db!, "conversations", convId);
-
-  await runTransaction(db!, async (tx) => {
-    const snap = await tx.get(convRef);
-    if (!snap.exists()) throw new Error("La conversación ya no existe.");
-    const data = snap.data() as {
-      participantIds: string[];
-      unread: Record<string, number>;
-    };
-    if (!data.participantIds.includes(senderId)) {
-      throw new Error("No puedes enviar mensajes en esta conversación.");
-    }
-    const otherIds = data.participantIds.filter((id) => id !== senderId);
-    const msgRef = doc(collection(convRef, "messages"));
-    const now = Date.now();
-    const preview =
-      !clean && attachments && attachments.length > 0
-        ? `📎 ${attachments[0].name}${
-            attachments.length > 1 ? ` (+${attachments.length - 1})` : ""
-          }`
-        : clean;
-    const patch: Record<string, unknown> = {
-      lastMessage: preview,
-      lastMessageAt: now,
-      [`unread.${senderId}`]: 0,
-    };
-    const mentioned = mentions ?? [];
-    for (const id of otherIds) {
-      patch[`unread.${id}`] =
-        (data.unread?.[id] ?? 0) + (mentioned.includes(id) ? 2 : 1);
-    }
-
-    const msgData: Record<string, unknown> = {
-      senderId,
-      text: clean,
-      createdAt: now,
-    };
-    if (replyTo) msgData.replyTo = replyTo;
-    if (attachments && attachments.length > 0) {
-      msgData.attachments = attachments;
-    }
-    if (mentioned.length > 0) {
-      msgData.mentions = mentioned;
-    }
-    if (forwardedFrom) {
-      msgData.forwardedFrom = forwardedFrom;
-    }
-
-    tx.set(msgRef, msgData);
-    tx.update(convRef, patch);
-  });
+  await sendConversationMessage(db!, { convId, senderId, text, replyTo, attachments, mentions, forwardedFrom, formatting });
 }
 
 export function markConversationRead(convId: string, uid: string): void {
-  updateDoc(doc(db!, "conversations", convId), { [`unread.${uid}`]: 0 }).catch(
-    () => {},
-  );
+  void markConversationReadOnce(db!, convId, uid).catch(() => {});
 }
 
 export async function pinMessage(
@@ -399,8 +349,9 @@ export async function editMessage(
   convId: string,
   msgId: string,
   text: string,
+  formatting?: TextFormat[],
 ): Promise<void> {
-  const clean = text.trim();
+  const { text: clean, formatting: cleanFormatting } = trimFormattedText(text, formatting);
   if (!clean) return;
   const msgRef = doc(db!, "conversations", convId, "messages", msgId);
   const now = Date.now();
@@ -417,7 +368,7 @@ export async function editMessage(
       ? (convSnap.data() as { lastMessage: string; lastMessageAt: number })
       : null;
 
-    tx.update(msgRef, { text: clean, edited: true, editedAt: now });
+    tx.update(msgRef, { text: clean, formatting: cleanFormatting, edited: true, editedAt: now });
 
     if (
       convData &&

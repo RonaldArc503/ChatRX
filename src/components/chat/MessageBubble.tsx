@@ -16,13 +16,16 @@ import {
 import { findMentionRanges } from "./mention";
 import { splitLinks } from "./linkify";
 import { formatTime } from "./time";
-import { authorTextColor } from "./Avatar";
+import { Avatar, authorTextColor } from "./Avatar";
+import type { MessageMenuAnchor } from "./MessageActionsSheet";
+import { InlineMessageEditor } from "./InlineMessageEditor";
+import { formattedSegments, type TextFormat } from "../../lib/messageFormatting";
 
 interface MessageBubbleProps {
   msg: ChatMessage;
   mine: boolean;
   uid: string;
-  onOpenMenu: (msg: ChatMessage) => void;
+  onOpenMenu: (msg: ChatMessage, anchor?: MessageMenuAnchor) => void;
   onReact: (msg: ChatMessage, emoji: string) => void;
   onOpenAttachment: (msg: ChatMessage, attachment: ChatAttachment) => void;
   onJumpToReply?: (msgId: string) => void;
@@ -30,6 +33,16 @@ interface MessageBubbleProps {
   highlighted?: boolean;
   showAuthor?: boolean;
   authorName?: string;
+  authorPhotoURL?: string;
+  desktop?: boolean;
+  grouped?: boolean;
+  onReply?: (msg: ChatMessage) => void;
+  threadReplies?: ChatMessage[];
+  onOpenThread?: () => void;
+  threadSelected?: boolean;
+  editing?: boolean;
+  onSaveEdit?: (message: ChatMessage, text: string, formatting: TextFormat[]) => Promise<void>;
+  onCancelEdit?: () => void;
   members?: Record<string, MemberSnapshot>;
 }
 
@@ -48,6 +61,16 @@ export function MessageBubble({
   highlighted,
   showAuthor,
   authorName,
+  authorPhotoURL,
+  desktop = false,
+  grouped = false,
+  onReply,
+  threadReplies,
+  onOpenThread,
+  threadSelected,
+  editing = false,
+  onSaveEdit,
+  onCancelEdit,
   members,
 }: MessageBubbleProps) {
   const timer = useRef<number | null>(null);
@@ -68,7 +91,7 @@ export function MessageBubble({
     timer.current = window.setTimeout(() => {
       timer.current = null;
       longPressAt.current = Date.now();
-      onOpenMenu(msg);
+      onOpenMenu(msg, start.current ?? undefined);
       if (typeof navigator !== "undefined" && "vibrate" in navigator) {
         navigator.vibrate(15);
       }
@@ -115,10 +138,44 @@ export function MessageBubble({
   const hasCaption = msg.text.trim().length > 0;
   const mentionedMe = msg.mentions?.includes(uid) ?? false;
   const mentionRanges = members ? findMentionRanges(msg.text, members) : [];
+  const bubbleMine = mine && !desktop;
+  const desktopTime = desktop ? new Date(msg.createdAt).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit", hour12: false }) : "";
+  const threadParticipants = [...new Set(threadReplies?.map((reply) => reply.senderId))].slice(-3);
 
   return (
-    <div class={"flex flex-col " + (mine ? "items-end" : "items-start")}>
-      {showAuthor && !mine ? (
+    <div
+      class={"chat-message group relative " + (desktop
+        ? "flex items-start gap-3.5 px-6 py-1 transition-colors " + (threadSelected || editing ? "bg-indigo-50 hover:bg-indigo-50 dark:bg-indigo-500/15 dark:hover:bg-indigo-500/15 " : "hover:bg-slate-50 dark:hover:bg-slate-800/50 ") + (grouped && !editing ? "" : "mt-3")
+        : "flex flex-col " + (mine ? "items-end" : "items-start"))}
+      onContextMenu={(event) => {
+        if (editing) return;
+        event.preventDefault();
+        clearTimer();
+        longPressAt.current = Date.now();
+        const bounds = event.currentTarget.getBoundingClientRect();
+        onOpenMenu(msg, event.clientX || event.clientY
+          ? { x: event.clientX, y: event.clientY }
+          : { x: bounds.left + 64, y: Math.max(0, bounds.top) + 24 });
+      }}
+    >
+      {desktop ? (
+        <div class="w-9 shrink-0">
+          {grouped && !editing ? (
+            <time class="block pt-1 text-center text-xs tabular-nums text-slate-400 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100" dateTime={new Date(msg.createdAt).toISOString()}>{desktopTime}</time>
+          ) : (
+            <span class="chat-message-avatar block"><Avatar uid={msg.senderId} name={authorName || (mine ? "Tú" : "Usuario")} photoURL={authorPhotoURL} /></span>
+          )}
+        </div>
+      ) : null}
+      <div class={desktop ? "min-w-0 flex-1" : "contents"}>
+      {desktop && !grouped && !editing ? (
+        <div class="mb-0.5 flex flex-wrap items-baseline gap-x-2">
+          <span class="text-[15px] font-bold leading-5 text-slate-900 dark:text-slate-100">{authorName || (mine ? "Tú" : "Usuario")}</span>
+          <time class="text-sm text-slate-500 dark:text-slate-400" dateTime={new Date(msg.createdAt).toISOString()}>{desktopTime}</time>
+          {mentionedMe ? <span class="text-xs font-semibold text-amber-600 dark:text-amber-400">Te mencionó</span> : null}
+        </div>
+      ) : null}
+      {!desktop && showAuthor && !mine ? (
         <span
           class={
             "mb-0.5 ml-3 flex items-center gap-1 text-[12px] font-semibold " +
@@ -131,17 +188,21 @@ export function MessageBubble({
           ) : null}
         </span>
       ) : null}
+      {desktop && editing && onSaveEdit && onCancelEdit ? (
+        <InlineMessageEditor message={msg} onSave={onSaveEdit} onCancel={onCancelEdit} />
+      ) : <>
       <div
         data-message-id={msg.id}
         class={
+          (desktop ? "min-w-0 text-slate-800 dark:text-slate-100 " :
           "max-w-[80%] pointer-coarse:select-none rounded-[18px] shadow-sm " +
           (hasMedia ? "overflow-hidden p-0 " : "px-3.5 py-2 ") +
-          (highlighted ? "msg-highlight " : "") +
           (mine
             ? "rounded-br-md bg-indigo-600 text-white"
             : hasMedia
               ? "rounded-bl-md bg-white text-slate-800 dark:bg-slate-800 dark:text-slate-100"
-              : "rounded-bl-md border border-slate-200 bg-white text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100")
+              : "rounded-bl-md border border-slate-200 bg-white text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100")) +
+          (highlighted ? " msg-highlight" : "")
         }
         style={{ touchAction: "pan-y" }}
         onPointerDown={handlePointerDown}
@@ -149,24 +210,18 @@ export function MessageBubble({
         onPointerUp={handlePointerEnd}
         onPointerLeave={handlePointerEnd}
         onPointerCancel={handlePointerEnd}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          clearTimer();
-          longPressAt.current = Date.now();
-          onOpenMenu(msg);
-        }}
       >
         {msg.replyTo ? (
           <button
             type="button"
             class={
-              "block w-full text-left " +
-              (hasMedia ? "mb-1 m-2 mt-2 " : "mb-1.5 ") +
+              "block w-full text-left " + (desktop ? "max-w-2xl " : "") +
+              (hasMedia && !desktop ? "mb-1 m-2 mt-2 " : "mb-1.5 ") +
               "rounded-lg px-2.5 py-1.5 text-xs " +
-              (mine
+              (bubbleMine
                 ? "bg-white/15 text-indigo-100"
                 : "bg-slate-100 text-slate-500 dark:bg-slate-700/70 dark:text-slate-300") +
-              (onJumpToReply ? " cursor-pointer transition-colors " + (mine ? "hover:bg-white/25" : "hover:bg-slate-200 dark:hover:bg-slate-700") : " cursor-default")
+              (onJumpToReply ? " cursor-pointer transition-colors " + (bubbleMine ? "hover:bg-white/25" : "hover:bg-slate-200 dark:hover:bg-slate-700") : " cursor-default")
             }
             onClick={(e) => {
               e.stopPropagation();
@@ -189,8 +244,8 @@ export function MessageBubble({
           <span
             class={
               "flex items-center gap-1 text-[12px] font-semibold " +
-              (hasMedia ? "m-2 mb-0 " : "mb-1 ") +
-              (mine ? "text-indigo-100/90" : "text-indigo-500 dark:text-indigo-400")
+              (hasMedia && !desktop ? "m-2 mb-0 " : "mb-1 ") +
+              (bubbleMine ? "text-indigo-100/90" : "text-indigo-500 dark:text-indigo-400")
             }
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" class="h-3 w-3 flex-none">
@@ -211,6 +266,7 @@ export function MessageBubble({
             class={
               (hasMedia && !hasCaption ? "relative " : "") +
               "flex flex-col gap-1.5" +
+              (desktop ? " max-w-[560px]" : "") +
               (hasMedia ? "" : " mb-1.5")
             }
           >
@@ -218,12 +274,12 @@ export function MessageBubble({
               <AttachmentItem
                 key={a.publicId + i}
                 a={a}
-                mine={mine}
+                mine={bubbleMine}
                 onOpen={openAttachment}
               />
             ))}
 
-            {hasMedia && !hasCaption ? (
+            {!desktop && hasMedia && !hasCaption ? (
               <div class="pointer-events-none absolute bottom-1.5 right-2 flex items-center gap-1">
                 {isPinned ? (
                   <span class="grid h-5 w-5 place-items-center rounded-full bg-slate-900/60 text-white backdrop-blur-sm">
@@ -242,19 +298,19 @@ export function MessageBubble({
         {hasCaption ? (
           <p
             class={
-              (hasMedia ? "px-3 pb-1 pt-1.5 " : "") +
-              "whitespace-pre-wrap break-words text-[15px] leading-snug"
+              (hasMedia && !desktop ? "px-3 pb-1 pt-1.5 " : "") +
+              "whitespace-pre-wrap break-words text-[15px] " + (desktop ? "leading-relaxed [overflow-wrap:anywhere]" : "leading-snug")
             }
           >
-            {renderRichText(msg.text, mine, mentionRanges, handleLinkClick)}
+            {renderRichText(msg.text, bubbleMine, mentionRanges, handleLinkClick, msg.formatting)}
           </p>
         ) : null}
-        {hasMedia && !hasCaption ? null : (
+        {(!desktop && hasMedia && !hasCaption) || (desktop && !isPinned && !msg.pending && !msg.edited) ? null : (
           <p
             class={
-              (hasMedia ? "px-3 pb-2 " : "mt-0.5 ") +
-              "text-right text-[11px] leading-none " +
-              (mine ? "text-indigo-200" : "text-slate-400 dark:text-slate-500")
+              (hasMedia && !desktop ? "px-3 pb-2 " : "mt-0.5 ") +
+              (desktop ? "text-left " : "text-right ") + "text-[11px] leading-none " +
+              (bubbleMine ? "text-indigo-200" : "text-slate-400 dark:text-slate-500")
             }
           >
             {isPinned ? <span class="mr-1 align-middle"><PinIcon /></span> : null}
@@ -262,7 +318,7 @@ export function MessageBubble({
               <span
                 class={
                   "mr-1 font-semibold uppercase " +
-                  (mine ? "text-indigo-200" : "text-amber-500 dark:text-amber-400")
+                  (bubbleMine ? "text-indigo-200" : "text-amber-500 dark:text-amber-400")
                 }
               >
                 Pendiente
@@ -271,7 +327,7 @@ export function MessageBubble({
             {msg.edited ? (
               <span class="mr-1 italic opacity-80">editado</span>
             ) : null}
-            {formatTime(msg.createdAt)}
+            {!desktop ? formatTime(msg.createdAt) : null}
           </p>
         )}
       </div>
@@ -283,7 +339,7 @@ export function MessageBubble({
               key={emoji}
               type="button"
               class={
-                "flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs shadow-sm transition-colors active:scale-95 " +
+                "flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs shadow-sm transition-colors active:scale-95 lg:text-sm " +
                 (reactions[uid] === emoji
                   ? "border-indigo-300 bg-indigo-100 text-indigo-700 dark:border-indigo-400 dark:bg-indigo-500/25 dark:text-indigo-300"
                   : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700")
@@ -295,6 +351,27 @@ export function MessageBubble({
               <span class="tabular-nums">{count}</span>
             </button>
           ))}
+        </div>
+      ) : null}
+      {desktop && threadReplies?.length && onOpenThread ? (
+        <button type="button" data-thread-root={msg.id} aria-controls="chat-thread-panel" aria-expanded={!!threadSelected}
+          onClick={onOpenThread} class="mt-2 flex max-w-full items-center gap-2 rounded-lg py-1 text-base font-semibold text-indigo-600 hover:underline focus-visible:outline-2 focus-visible:outline-indigo-500 dark:text-indigo-400">
+          <span class="thread-participants flex shrink-0 -space-x-1" aria-hidden="true">{threadParticipants.map((id) => <Avatar key={id} uid={id} name={members?.[id]?.displayName || "Contacto"} photoURL={members?.[id]?.photoURL} size="sm" />)}</span>
+          <span>{threadReplies.length} {threadReplies.length === 1 ? "respuesta" : "respuestas"}</span>
+        </button>
+      ) : null}
+      </>}
+      </div>
+      {desktop && !editing ? (
+        <div class="absolute right-5 -top-3 z-10 flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5 opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 dark:border-slate-700 dark:bg-slate-800">
+          {onReply ? (
+            <button type="button" aria-label="Responder en hilo" title="Responder en hilo" disabled={msg.pending} onClick={() => onReply(msg)} class="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 focus-visible:outline-2 focus-visible:outline-indigo-500 disabled:opacity-40 dark:text-slate-300 dark:hover:bg-indigo-500/20 dark:hover:text-indigo-400">
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-4 w-4"><path d="m9 10-5 5 5 5" /><path d="M4 15h10a6 6 0 0 0 0-12" /></svg>
+            </button>
+          ) : null}
+          <button type="button" aria-label="Acciones del mensaje" aria-haspopup="menu" title="Más acciones" onClick={(event) => { const bounds = event.currentTarget.getBoundingClientRect(); onOpenMenu(msg, { x: bounds.right, y: bounds.bottom + 6, align: "end" }); }} class="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 focus-visible:outline-2 focus-visible:outline-indigo-500 dark:text-slate-300 dark:hover:bg-indigo-500/20 dark:hover:text-indigo-400">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor" class="h-5 w-5"><circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" /></svg>
+          </button>
         </div>
       ) : null}
     </div>
@@ -330,11 +407,22 @@ function renderRichText(
   mine: boolean,
   mentions: ReturnType<typeof findMentionRanges>,
   onLinkClick: (e: MouseEvent) => void,
+  formatting?: TextFormat[],
 ) {
   const segs = splitLinks(text);
   const out: preact.ComponentChild[] = [];
   let textPos = 0;
   let keyCounter = 0;
+  function styled(value: string, offset: number) {
+    return formattedSegments(value, formatting?.map((range) => ({ ...range, start: range.start - offset, end: range.end - offset })))
+      .map((segment) => {
+        let content: preact.ComponentChild = segment.text;
+        if (segment.styles.includes("underline")) content = <u>{content}</u>;
+        if (segment.styles.includes("italic")) content = <em>{content}</em>;
+        if (segment.styles.includes("bold")) content = <strong>{content}</strong>;
+        return <span key={segment.start}>{content}</span>;
+      });
+  }
 
   for (const seg of segs) {
     if (seg.url) {
@@ -351,7 +439,7 @@ function renderRichText(
             }
             onClick={onLinkClick}
           >
-            {seg.text}
+            {styled(seg.text, textPos)}
           </a>,
         );
       }
@@ -368,7 +456,7 @@ function renderRichText(
       if (match && match.start > textPos + offset) {
         out.push(
           <span key={"t" + keyCounter++}>
-            {remaining.slice(0, match.start - (textPos + offset))}
+            {styled(remaining.slice(0, match.start - (textPos + offset)), textPos + offset)}
           </span>,
         );
       }
@@ -387,12 +475,12 @@ function renderRichText(
                 : "bg-indigo-100 font-semibold text-indigo-700 dark:bg-indigo-500/25 dark:text-indigo-300")
             }
           >
-            {remaining.slice(localStart, localStart + len)}
+            {styled(remaining.slice(localStart, localStart + len), textPos + offset + localStart)}
           </span>,
         );
         offset += localEnd;
       } else {
-        out.push(<span key={"t" + keyCounter++}>{remaining}</span>);
+        out.push(<span key={"t" + keyCounter++}>{styled(remaining, textPos + offset)}</span>);
         offset += remaining.length;
       }
       remaining = seg.text.slice(offset);
@@ -414,7 +502,7 @@ function AttachmentItem({ a, mine, onOpen }: AttachmentItemProps) {
           src={attachmentMediaUrl(a.url, "w_700,f_auto,q_auto")}
           alt={a.name}
           loading="lazy"
-          class="block max-h-80 w-auto max-w-full object-cover"
+          class="block max-h-80 w-auto max-w-full object-cover lg:rounded-lg"
         />
       </button>
     );

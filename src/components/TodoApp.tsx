@@ -46,6 +46,18 @@ export function TodoApp({ uid }: TodoAppProps) {
   const doneCount = byStatus.done.length;
   const progress = total ? Math.round((doneCount / total) * 100) : 0;
 
+  const [highlightOldest, setHighlightOldest] = useState(true);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setHighlightOldest(false), 2400);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const activeTodos = useMemo(() => todos.filter((t) => t.status !== "done"), [todos]);
+  const oldestActiveId = useMemo(() => {
+    if (activeTodos.length === 0) return null;
+    return [...activeTodos].sort((a, b) => a.createdAt - b.createdAt)[0]?.id ?? null;
+  }, [activeTodos]);
+
   function showToast(next: ToastState) {
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
     setToast(next);
@@ -209,6 +221,7 @@ export function TodoApp({ uid }: TodoAppProps) {
                 <TodoCard
                   key={todo.id}
                   todo={todo}
+                  isOldest={highlightOldest && oldestActiveId === todo.id}
                   onMove={moveTodo}
                   onDelete={deleteTodo}
                 />

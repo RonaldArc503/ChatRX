@@ -1,15 +1,17 @@
 import type { JSX } from "preact";
+import { Avatar } from "./chat/Avatar";
 
 export type View = "home" | "tasks" | "chat" | "saved" | "reminders" | "profile";
 
 interface BottomNavProps {
   view: View;
   onNavigate: (view: View) => void;
+  profile?: { uid: string; displayName: string | null; photoURL: string | null };
 }
 
 const ICON_PROPS = {
   viewBox: "0 0 24 24",
-  class: "h-7 w-7 lg:h-6 lg:w-6",
+  class: "h-7 w-7 lg:h-[17px] lg:w-[17px]",
   fill: "none",
   stroke: "currentColor",
   strokeWidth: 2,
@@ -17,7 +19,7 @@ const ICON_PROPS = {
   strokeLinejoin: "round",
 } as const;
 
-const ITEMS: { key: View; label: string; icon: () => JSX.Element }[] = [
+const ITEMS: { key: View; label: string; desktopOnly?: boolean; icon: () => JSX.Element }[] = [
   {
     key: "home",
     label: "Inicio",
@@ -48,6 +50,16 @@ const ITEMS: { key: View; label: string; icon: () => JSX.Element }[] = [
     ),
   },
   {
+    key: "saved",
+    label: "Guardados",
+    desktopOnly: true,
+    icon: () => (
+      <svg {...ICON_PROPS}>
+        <path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Z" />
+      </svg>
+    ),
+  },
+  {
     key: "reminders",
     label: "Recordatorios",
     icon: () => (
@@ -69,19 +81,30 @@ const ITEMS: { key: View; label: string; icon: () => JSX.Element }[] = [
   },
 ];
 
-export function BottomNav({ view, onNavigate }: BottomNavProps) {
+export function BottomNav({ view, onNavigate, profile }: BottomNavProps) {
   return (
     <nav
       class={
-        "fixed inset-x-0 bottom-0 z-40 bg-white/95 backdrop-blur dark:bg-slate-900/95 " +
+        "app-navigation fixed inset-x-0 bottom-0 z-40 bg-white/95 backdrop-blur dark:bg-slate-900/95 lg:inset-x-auto lg:left-0 lg:top-[var(--audio-bar-h)] lg:w-[var(--app-rail-w)] lg:border-r lg:border-slate-200 lg:dark:border-slate-800 " +
         (view === "chat"
           ? "shadow-[0_-3px_12px_rgb(15_23_42/0.06)]"
           : "border-t border-slate-200 dark:border-slate-800")
       }
       aria-label="Navegación principal"
     >
-      <div class="mx-auto flex max-w-5xl items-stretch px-1 sm:px-4">
-        {ITEMS.map(({ key, label, icon }) => {
+      <div class="mx-auto flex max-w-5xl items-stretch px-1 sm:px-4 lg:h-full lg:flex-col lg:gap-2 lg:overflow-y-auto lg:px-2 lg:py-3">
+        <button
+          type="button"
+          aria-label="Taskly, ir al inicio"
+          onClick={() => onNavigate("home")}
+          class="mb-2 hidden shrink-0 flex-col items-center gap-1 rounded-xl py-2 text-indigo-600 focus-visible:outline-2 focus-visible:outline-indigo-500 dark:text-indigo-400 lg:flex"
+        >
+          <span class="grid h-10 w-10 place-items-center rounded-xl bg-indigo-600 text-white shadow-sm">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" class="h-6 w-6"><path d="m6 12 4 4 8-9" /></svg>
+          </span>
+          <span class="text-[11px] font-extrabold tracking-tight">Taskly</span>
+        </button>
+        {ITEMS.map(({ key, label, icon, desktopOnly }) => {
           const Icon = icon;
           const active = view === key;
           return (
@@ -89,15 +112,22 @@ export function BottomNav({ view, onNavigate }: BottomNavProps) {
               key={key}
               type="button"
               class={
-                "group flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px] font-medium transition-colors lg:flex-row lg:justify-center lg:gap-2 lg:px-5 lg:py-4 lg:text-sm" +
+                (desktopOnly ? "hidden lg:flex " : "flex ") +
+                "group flex-1 flex-col items-center gap-0.5 py-2 text-[11px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-indigo-500 lg:flex-none lg:shrink-0 lg:gap-1.5 lg:rounded-xl lg:px-1 lg:py-2.5 lg:text-[11px] lg:font-semibold" +
+                (key === "profile" ? " lg:mt-auto" : "") +
                 (active
-                  ? " text-indigo-600 dark:text-indigo-400"
-                  : " text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200")
+                  ? " text-indigo-600 dark:text-indigo-400 lg:bg-indigo-50 lg:dark:bg-indigo-500/15"
+                  : " text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 lg:hover:bg-slate-100 lg:dark:hover:bg-slate-800")
               }
               aria-current={active ? "page" : undefined}
               onClick={() => onNavigate(key)}
             >
-              <Icon />
+              {key === "profile" && profile ? (
+                <>
+                  <span class="lg:hidden"><Icon /></span>
+                  <span class="hidden lg:block"><Avatar uid={profile.uid} name={profile.displayName || "Perfil"} photoURL={profile.photoURL || ""} size="sm" /></span>
+                </>
+              ) : <Icon />}
               <span class="flex flex-col items-center gap-0.5">
                 {label}
                 <span
