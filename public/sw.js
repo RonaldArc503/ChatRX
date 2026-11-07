@@ -1,4 +1,4 @@
-const STATIC_CACHE = "taskly-static-v1";
+const STATIC_CACHE = "taskly-static-v2";
 const MEDIA_CACHE = "taskly-media-v1";
 
 const PRECACHE = [
@@ -72,16 +72,17 @@ async function staleWhileRevalidate(request, cacheName) {
 }
 
 async function handleNavigation(request) {
+  const key = new URL(request.url).pathname === "/" ? "/index.html" : request.url;
   try {
     const response = await fetch(request);
     if (response.ok) {
       const cache = await caches.open(STATIC_CACHE);
-      await cache.put("/index.html", response.clone());
+      await cache.put(key, response.clone());
     }
     return response;
   } catch (err) {
     const cache = await caches.open(STATIC_CACHE);
-    const cached = await cache.match("/index.html");
+    const cached = await cache.match(key);
     return cached || Response.error();
   }
 }
@@ -93,6 +94,11 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
 
   if (url.origin === self.location.origin) {
+    // Authenticated agent responses must never enter a shared browser cache.
+    if (url.pathname.startsWith("/api/") || url.pathname === "/mcp") {
+      event.respondWith(fetch(request));
+      return;
+    }
     if (request.mode === "navigate") {
       event.respondWith(handleNavigation(request));
       return;

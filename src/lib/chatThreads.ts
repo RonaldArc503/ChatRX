@@ -24,7 +24,8 @@ export function buildMessageThreads(messages: ChatMessage[]) {
       }
       visited.add(current.id);
       path.push(current.id);
-      const parent = current.replyTo ? byId.get(current.replyTo.id) : undefined;
+      const parentId = current.threadRootId ?? current.replyTo?.id;
+      const parent = parentId ? byId.get(parentId) : undefined;
       if (!parent) {
         root = current.id;
         break;

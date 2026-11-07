@@ -1,0 +1,13 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.ronaldcolocho.taskly",
+      "sha256_cert_fingerprints": [
+        "B7:96:68:A0:56:D2:29:62:F9:2E:39:43:05:1F:3A:59:BF:BC:4C:7D:72:17:24:C1:3B:D6:4D:EA:20:3F:48:05",
+        "36:25:16:08:C4:FF:B5:B3:0C:B5:C7:7C:1B:24:DC:E1:EE:85:DF:9F:E5:88:7C:A9:42:B4:BC:4D:F8:8F:76:C7"
+      ]
+    }
+  }
+]

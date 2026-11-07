@@ -9,12 +9,17 @@
     "dev": "astro dev",
     "check": "astro check",
     "test:chat-threads": "node --experimental-strip-types --test src/lib/chatThreads.test.mjs",
+    "test:music-shared": "node --experimental-strip-types --test src/lib/sharedPlaylistModel.test.mjs src/lib/sharedPlaylistHosting.test.mjs",
+    "test:chat-content": "node --experimental-strip-types --test src/lib/conversationContent.test.mjs",
     "test:chat-writes": "node --experimental-strip-types --test src/lib/chatMessageWrites.test.mjs",
-    "test:chat-formatting": "node --experimental-strip-types --test src/lib/messageFormatting.test.mjs",
+    "test:chat-formatting": "node --experimental-strip-types --test src/lib/messageFormatting.test.mjs src/lib/messageClipboard.test.mjs",
     "test:chat-burst": "node --experimental-strip-types scripts/test-chat-burst.mjs",
     "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "test:chat-sync": "node --experimental-strip-types --test src/lib/chatSync.emulator.test.mjs",
+    "test:agents": "node --experimental-strip-types --test src/lib/agentModel.test.mjs",
+    "test:agents-service": "npm --prefix agents-service test"
   },
   "dependencies": {
     "@astrojs/preact": "^6.0.2",
@@ -32,11 +37,13 @@
     "@tiptap/extensions": "^3.32.1",
     "astro": "^7.2.0",
     "firebase": "^12.17.1",
+    "marked": "^18.1.2",
     "preact": "^10.29.8",
     "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.10",
+    "jsdom": "^29.1.1",
     "typescript": "^6.0.3"
   }
 }

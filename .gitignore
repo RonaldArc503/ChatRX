@@ -27,3 +27,9 @@ ui-debug.log
 
 # jetbrains setting folder
 .idea/
+
+# Agent credentials stay outside version control
+**/.env.*
+!**/.env.example
+supabase/.temp/
+supabase/.branches/

@@ -1,6 +1,6 @@
 import { useId, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { ComponentChildren, RefObject } from "preact";
-import { Editor } from "@tiptap/core";
+import { Editor, Mark } from "@tiptap/core";
 import Document from "@tiptap/extension-document";
 import Paragraph from "@tiptap/extension-paragraph";
 import Text from "@tiptap/extension-text";
@@ -10,6 +10,23 @@ import Italic from "@tiptap/extension-italic";
 import Underline from "@tiptap/extension-underline";
 import { UndoRedo } from "@tiptap/extensions";
 import { fromEditorDocument, sameFormatting, toEditorDocument, type TextFormat, type TextStyle } from "../../lib/messageFormatting";
+import { readMessageClipboard } from "../../lib/messageClipboard";
+
+const Code = Mark.create({
+  name: "code", inclusive: false,
+  parseHTML: () => [{ tag: "code" }],
+  renderHTML: () => ["code", {}, 0],
+});
+const CodeBlock = Mark.create({
+  name: "codeBlock", inclusive: false,
+  parseHTML: () => [{ tag: "span[data-code-block]" }],
+  renderHTML: () => ["span", { "data-code-block": "" }, 0],
+});
+const Strike = Mark.create({
+  name: "strike",
+  parseHTML: () => [{ tag: "s" }, { tag: "del" }],
+  renderHTML: () => ["s", {}, 0],
+});
 
 export interface MessageEditorHandle {
   readonly value: string;
@@ -43,12 +60,13 @@ export function MessageTextEditor(props: Props) {
   const [showTools, setShowTools] = useState(true);
   const [, refresh] = useState(0);
   const toolbarId = useId();
+  const pastePlain = useRef(false);
 
   useLayoutEffect(() => {
     if (!host.current) return;
     const instance = new Editor({
       element: host.current,
-      extensions: [Document, Paragraph, Text, HardBreak, Bold, Italic, Underline, UndoRedo],
+      extensions: [Document, Paragraph, Text, HardBreak, Bold, Italic, Underline, Code, CodeBlock, Strike, UndoRedo],
       content: toEditorDocument(current.current.value, current.current.formatting),
       // Keep the focused textbox mounted, including while sending attachments.
       editorProps: {
@@ -67,9 +85,37 @@ export function MessageTextEditor(props: Props) {
         handlePaste: (_view, event) => {
           if (current.current.readOnly) return true;
           current.current.onPaste?.(event);
-          return event.defaultPrevented;
+          if (event.defaultPrevented) return true;
+          const clipboard = event.clipboardData;
+          if (!clipboard || (!clipboard.types.includes("text/plain") && !clipboard.types.includes("text/html"))) return false;
+          const plain = clipboard.getData("text/plain");
+          if (pastePlain.current) {
+            pastePlain.current = false;
+            event.preventDefault();
+            handle.insertText(plain);
+            return true;
+          }
+          // Pasting into code must never reinterpret operators as Markdown.
+          if (instance.isActive("code") || instance.isActive("codeBlock")) {
+            event.preventDefault();
+            handle.insertText(plain);
+            return true;
+          }
+          const pasted = readMessageClipboard(plain, clipboard.getData("text/html"));
+          event.preventDefault();
+          if (!("rich" in pasted && pasted.rich)) {
+            handle.insertText(pasted.text);
+            return true;
+          }
+          const content = toEditorDocument(pasted.text, pasted.formatting).content?.[0]?.content ?? [];
+          instance.commands.insertContent(content);
+          return true;
         },
         handleDOMEvents: {
+          keydown: (_view, event) => {
+            pastePlain.current = (event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "v";
+            return false;
+          },
           beforeinput: (_view, event) => {
             if (!current.current.readOnly) return false;
             event.preventDefault(); return true;
@@ -129,7 +175,7 @@ export function MessageTextEditor(props: Props) {
     instance.view.dom.setAttribute("data-empty", String(instance.isEmpty));
   });
 
-  function toggle(style: TextStyle) {
+  function toggle(style: Extract<TextStyle, "bold" | "italic" | "underline">) {
     if (props.readOnly) return;
     const chain = editor.current?.chain().focus();
     if (style === "bold") chain?.toggleBold().run();

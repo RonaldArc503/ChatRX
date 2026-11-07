@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { ChatAttachment, ChatMessage, MemberSnapshot } from "../../lib/chat";
-import { attachmentMediaUrl, formatBytes } from "../../lib/cloudinary";
+import { attachmentMediaUrl, formatBytes, isTextAttachment } from "../../lib/cloudinary";
 import {
   formatDuration,
   getAudioState,
@@ -19,7 +19,7 @@ import { formatTime } from "./time";
 import { Avatar, authorTextColor } from "./Avatar";
 import type { MessageMenuAnchor } from "./MessageActionsSheet";
 import { InlineMessageEditor } from "./InlineMessageEditor";
-import { formattedSegments, type TextFormat } from "../../lib/messageFormatting";
+import { formattedSegments, messageParts, type TextFormat } from "../../lib/messageFormatting";
 
 interface MessageBubbleProps {
   msg: ChatMessage;
@@ -296,14 +296,18 @@ export function MessageBubble({
         ) : null}
 
         {hasCaption ? (
-          <p
+          <div
             class={
               (hasMedia && !desktop ? "px-3 pb-1 pt-1.5 " : "") +
               "whitespace-pre-wrap break-words text-[15px] " + (desktop ? "leading-relaxed [overflow-wrap:anywhere]" : "leading-snug")
             }
           >
-            {renderRichText(msg.text, bubbleMine, mentionRanges, handleLinkClick, msg.formatting)}
-          </p>
+            {messageParts(msg.text, msg.formatting).map((part) => part.code
+              ? <MessageCodeBlock key={`code-${part.start}`} text={part.text} />
+              : <span key={`text-${part.start}`}>{renderRichText(part.text, bubbleMine,
+                mentionRanges.map((range) => ({ ...range, start: range.start - part.start, end: range.end - part.start })), handleLinkClick,
+                msg.formatting?.map((range) => ({ ...range, start: range.start - part.start, end: range.end - part.start })))}</span>)}
+          </div>
         ) : null}
         {(!desktop && hasMedia && !hasCaption) || (desktop && !isPinned && !msg.pending && !msg.edited) ? null : (
           <p
@@ -402,6 +406,29 @@ function PinIcon() {
   );
 }
 
+function MessageCodeBlock({ text }: { text: string }) {
+  const [status, setStatus] = useState<"idle" | "copied" | "failed">("idle");
+  const timeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timeout.current), []);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setStatus("copied");
+    } catch { setStatus("failed"); }
+    clearTimeout(timeout.current);
+    timeout.current = setTimeout(() => setStatus("idle"), 2000);
+  }
+  return <div class="my-2 min-w-0 max-w-full select-text overflow-hidden whitespace-normal rounded-xl border border-slate-700 bg-slate-950 text-slate-100"
+    onPointerDown={(event) => event.stopPropagation()} onContextMenu={(event) => event.stopPropagation()}>
+    <div class="flex items-center justify-between gap-4 border-b border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-300">
+      <span>Código</span>
+      <button type="button" onClick={copy} class="rounded px-2 py-1 font-medium hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-indigo-400"
+        aria-label="Copiar código"><span aria-live="polite">{status === "copied" ? "Copiado" : status === "failed" ? "No se pudo copiar" : "Copiar código"}</span></button>
+    </div>
+    <pre class="m-0 max-w-full overflow-x-auto whitespace-pre p-3 text-[13px] leading-relaxed [overflow-wrap:normal] [tab-size:4]"><code>{text}</code></pre>
+  </div>;
+}
+
 function renderRichText(
   text: string,
   mine: boolean,
@@ -417,6 +444,8 @@ function renderRichText(
     return formattedSegments(value, formatting?.map((range) => ({ ...range, start: range.start - offset, end: range.end - offset })))
       .map((segment) => {
         let content: preact.ComponentChild = segment.text;
+        if (segment.styles.includes("code")) content = <code class="rounded bg-slate-500/15 px-1 py-0.5 font-mono text-[0.9em]">{content}</code>;
+        if (segment.styles.includes("strike")) content = <s>{content}</s>;
         if (segment.styles.includes("underline")) content = <u>{content}</u>;
         if (segment.styles.includes("italic")) content = <em>{content}</em>;
         if (segment.styles.includes("bold")) content = <strong>{content}</strong>;
@@ -426,6 +455,11 @@ function renderRichText(
 
   for (const seg of segs) {
     if (seg.url) {
+      if (formatting?.some((range) => range.style === "code" && range.start < textPos + seg.text.length && range.end > textPos)) {
+        out.push(<span key={"c" + keyCounter++}>{styled(seg.text, textPos)}</span>);
+        textPos += seg.text.length;
+        continue;
+      }
       if (seg.text.length > 0) {
         out.push(
           <a
@@ -586,13 +620,13 @@ function AttachmentItem({ a, mine, onOpen }: AttachmentItemProps) {
           {formatBytes(a.size)}
         </span>
       </span>
-      {a.kind === "pdf" ? (
+      {a.kind === "pdf" || isTextAttachment(a) ? (
         <button
           type="button"
           class="flex-none rounded-lg px-3 py-1.5 text-xs font-bold text-indigo-400 transition-colors hover:bg-indigo-500/10"
           onClick={() => onOpen(a)}
         >
-          Ver
+          {a.kind === "pdf" ? "Ver" : "Abrir"}
         </button>
       ) : (
         <a

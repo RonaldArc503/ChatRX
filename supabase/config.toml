@@ -1,0 +1,6 @@
+project_id = "taskly"
+
+[functions.taskly-agents]
+# Firebase ID tokens and scoped agent credentials are validated by the service.
+verify_jwt = false
+entrypoint = "./functions/taskly-agents/index.mjs"

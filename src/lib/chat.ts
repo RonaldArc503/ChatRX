@@ -2,12 +2,10 @@ import {
   arrayRemove,
   arrayUnion,
   collection,
-  deleteDoc,
   deleteField,
   doc,
   getDoc,
   getDocs,
-  limit,
   onSnapshot,
   orderBy,
   query,
@@ -19,9 +17,11 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import { db } from "./firebase";
+import { findOrCreateChat } from "./chatConversations";
+import { editChatMessage, deleteChatMessage } from "./chatMessageMutations";
 import type { UserProfile } from "./profile";
 import { markConversationReadOnce, sendConversationMessage } from "./chatMessageWrites";
-import { trimFormattedText, type TextFormat } from "./messageFormatting";
+import { type TextFormat } from "./messageFormatting";
 
 export interface MemberSnapshot {
   displayName: string;
@@ -85,6 +85,8 @@ export interface ChatMessage {
   mentions?: string[];
   forwardedFrom?: ForwardedFrom | null;
   pending?: boolean;
+  threadRootId?: string;
+  replyCount?: number;
 }
 
 export function conversationId(uidA: string, uidB: string): string {
@@ -151,7 +153,7 @@ export async function addGroupMembers(
 
   await updateDoc(ref, {
     participantIds: arrayUnion(...uids),
-    members,
+    ...Object.fromEntries(Object.entries(members).map(([uid, member]) => [`members.${uid}`, member])),
     ...unreadPatch,
   });
 }
@@ -199,43 +201,11 @@ export async function getOrCreateConversation(
   other: UserProfile,
 ): Promise<string | null> {
   if (me.uid === other.uid) return null;
-  const id = conversationId(me.uid, other.uid);
-  const ref = doc(db!, "conversations", id);
-  const snap = await getDoc(ref);
-  if (snap.exists()) return id;
-
-  const now = Date.now();
-  await setDoc(ref, {
-    participantIds: [me.uid, other.uid].sort(),
-    members: {
-      [me.uid]: memberSnapshot(me),
-      [other.uid]: memberSnapshot(other),
-    },
-    unread: { [me.uid]: 0, [other.uid]: 0 },
-    lastMessage: "",
-    lastMessageAt: 0,
-    createdAt: now,
-  });
-  return id;
+  return findOrCreateChat(db!, me, other);
 }
 
-export async function ensureSelfConversation(
-  me: UserProfile,
-): Promise<string | null> {
-  const id = conversationId(me.uid, me.uid);
-  const ref = doc(db!, "conversations", id);
-  const snap = await getDoc(ref);
-  if (snap.exists()) return id;
-
-  await setDoc(ref, {
-    participantIds: [me.uid],
-    members: { [me.uid]: memberSnapshot(me) },
-    unread: { [me.uid]: 0 },
-    lastMessage: "",
-    lastMessageAt: 0,
-    createdAt: Date.now(),
-  });
-  return id;
+export async function ensureSelfConversation(me: UserProfile): Promise<string | null> {
+  return findOrCreateChat(db!, me, me);
 }
 
 export function subscribeConversations(
@@ -303,8 +273,8 @@ export async function sendMessage(
   await sendConversationMessage(db!, { convId, senderId, text, replyTo, attachments, mentions, forwardedFrom, formatting });
 }
 
-export function markConversationRead(convId: string, uid: string): void {
-  void markConversationReadOnce(db!, convId, uid).catch(() => {});
+export function markConversationRead(convId: string, uid: string, message?: Pick<ChatMessage, "id" | "createdAt">): void {
+  void markConversationReadOnce(db!, convId, uid, message).catch(() => {});
 }
 
 export async function pinMessage(
@@ -351,70 +321,11 @@ export async function editMessage(
   text: string,
   formatting?: TextFormat[],
 ): Promise<void> {
-  const { text: clean, formatting: cleanFormatting } = trimFormattedText(text, formatting);
-  if (!clean) return;
-  const msgRef = doc(db!, "conversations", convId, "messages", msgId);
-  const now = Date.now();
-
-  const convRef = doc(db!, "conversations", convId);
-
-  await runTransaction(db!, async (tx) => {
-    const snap = await tx.get(msgRef);
-    if (!snap.exists()) throw new Error("El mensaje ya no existe.");
-
-    const convSnap = await tx.get(convRef);
-    const msg = snap.data() as { createdAt: number; text: string };
-    const convData = convSnap.exists()
-      ? (convSnap.data() as { lastMessage: string; lastMessageAt: number })
-      : null;
-
-    tx.update(msgRef, { text: clean, formatting: cleanFormatting, edited: true, editedAt: now });
-
-    if (
-      convData &&
-      convData.lastMessageAt === msg.createdAt &&
-      convData.lastMessage === msg.text
-    ) {
-      tx.update(convRef, { lastMessage: clean });
-    }
-  });
+  await editChatMessage(db!, convId, msgId, text, formatting);
 }
 
 export async function deleteMessage(convId: string, msgId: string): Promise<void> {
-  const msgRef = doc(db!, "conversations", convId, "messages", msgId);
-  const target = await getDoc(msgRef);
-  if (!target.exists()) return;
-  await deleteDoc(msgRef);
-
-  const latest = await getDocs(
-    query(
-      collection(db!, "conversations", convId, "messages"),
-      orderBy("createdAt", "desc"),
-      limit(1),
-    ),
-  );
-  const convRef = doc(db!, "conversations", convId);
-  if (latest.empty) {
-    await updateDoc(convRef, { lastMessage: "", lastMessageAt: 0 });
-    return;
-  }
-  const m = latest.docs[0].data() as {
-    text?: string;
-    createdAt: number;
-    attachments?: ChatAttachment[];
-  };
-  const preview =
-    (!m.text || m.text.trim().length === 0) &&
-    m.attachments &&
-    m.attachments.length > 0
-      ? `📎 ${m.attachments[0].name}${
-          m.attachments.length > 1 ? ` (+${m.attachments.length - 1})` : ""
-        }`
-      : m.text ?? "";
-  await updateDoc(convRef, {
-    lastMessage: preview,
-    lastMessageAt: m.createdAt,
-  });
+  await deleteChatMessage(db!, convId, msgId);
 }
 
 export async function toggleReaction(

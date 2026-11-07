@@ -182,14 +182,14 @@ export function ThreadPanel({ root, replies, me, members, draft, editingId, focu
       {draft.files.length > 0 ? <ul class="mx-4 max-h-32 shrink-0 overflow-y-auto text-sm text-slate-600 dark:text-slate-300" aria-label="Adjuntos del hilo">
         {draft.files.map((file, index) => <li key={`${file.name}-${index}`} class="flex items-center gap-2 py-1"><span class="min-w-0 flex-1 truncate">{file.name} · {formatBytes(file.size)}</span><button type="button" disabled={sending} aria-label={`Quitar ${file.name}`} onClick={() => { uploads.current.delete(file); onDraftChange({ ...draft, files: draft.files.filter((_, i) => i !== index) }); }} class="grid h-8 w-8 shrink-0 place-items-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800">×</button></li>)}
       </ul> : null}
-      <form class="mx-4 mb-4 mt-3 shrink-0 overflow-hidden rounded-xl border border-slate-300 bg-white shadow-sm focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-500/15 dark:border-slate-700 dark:bg-slate-900"
+      <form class="mx-4 mb-4 mt-3 shrink-0 overflow-hidden rounded-xl border border-slate-300 bg-white shadow-sm focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-500/15 dark:border-slate-700 dark:bg-slate-800"
         onSubmit={(event) => { event.preventDefault(); void submit(); }}>
         <MessageTextEditor editorRef={inputRef} value={value} formatting={draft.formatting} readOnly={sending} label="Respuesta en el hilo"
           placeholder="Responder…" className="message-editor-tall text-slate-800 dark:text-slate-100"
           onChange={changeText} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); void submit(); } }}
           onPaste={(event) => { const files = Array.from(event.clipboardData?.files ?? []); if (files.length) { event.preventDefault(); addFiles(files); } }}
           footerStart={<>
-          <input ref={filesRef} type="file" multiple class="hidden" accept="image/*,video/*,audio/*,.pdf,.doc,.docx" onChange={(event) => { addFiles(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = ""; }} />
+          <input ref={filesRef} type="file" multiple class="hidden" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.md,.sh" onChange={(event) => { addFiles(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = ""; }} />
           <button type="button" aria-label="Adjuntar al hilo" title="Adjuntar archivo" disabled={sending} onClick={() => filesRef.current?.click()} class="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" class="h-6 w-6"><path d="M12 5v14M5 12h14" /></svg></button>
           </>} footerEnd={<>
           <span class="min-w-0 flex-1 text-xs text-slate-400">Enter para enviar</span>

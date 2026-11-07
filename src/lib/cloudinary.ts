@@ -21,10 +21,14 @@ export interface CloudinaryUploadResult {
 export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 export const MAX_ATTACHMENTS_PER_MESSAGE = 30;
 
-const cloudName = import.meta.env.PUBLIC_CLOUDINARY_CLOUD_NAME || "lrpsglzl";
+const cloudName = import.meta.env?.PUBLIC_CLOUDINARY_CLOUD_NAME || "lrpsglzl";
 const uploadPreset =
-  import.meta.env.PUBLIC_CLOUDINARY_UPLOAD_PRESET || "chat_uploads";
-const apiKey = import.meta.env.PUBLIC_CLOUDINARY_API_KEY || "811998144818725";
+  import.meta.env?.PUBLIC_CLOUDINARY_UPLOAD_PRESET || "chat_uploads";
+const apiKey = import.meta.env?.PUBLIC_CLOUDINARY_API_KEY || "811998144818725";
+
+export function isTextAttachment(file: { name: string; mimeType?: string }): boolean {
+  return /\.(md|sh)$/i.test(file.name) || /^(?:text\/(?:x-)?markdown|(?:text|application)\/x-(?:sh|shellscript))(?:;|$)/i.test(file.mimeType ?? "");
+}
 
 const IMAGE_TYPES = new Set([
   "image/jpeg",

@@ -1,10 +1,10 @@
 import type { JSONContent } from "@tiptap/core";
 
-export const TEXT_STYLES = ["bold", "italic", "underline"] as const;
+export const TEXT_STYLES = ["bold", "italic", "underline", "strike", "code", "codeBlock"] as const;
 export type TextStyle = typeof TEXT_STYLES[number];
 export interface TextFormat { start: number; end: number; style: TextStyle }
 
-/** Only offsets and these three marks are stored; message content is never HTML. */
+/** Only allowlisted marks and offsets are stored; message content is never HTML. */
 export function normalizeFormatting(text: string, input: unknown): TextFormat[] {
   if (!Array.isArray(input)) return [];
   const result: TextFormat[] = [];
@@ -22,10 +22,28 @@ export function normalizeFormatting(text: string, input: unknown): TextFormat[] 
 }
 
 export function trimFormattedText(text: string, formatting?: TextFormat[]) {
-  const start = text.length - text.trimStart().length;
-  const clean = text.trim();
+  const ranges = normalizeFormatting(text, formatting);
+  // Whitespace within a script is part of its contents, including indentation.
+  const blocks = ranges.filter((range) => range.style === "codeBlock");
+  const start = Math.min(text.length - text.trimStart().length, ...blocks.map((range) => range.start));
+  const end = Math.max(text.trimEnd().length, ...blocks.map((range) => range.end));
+  const clean = text.slice(start, end);
   return { text: clean, formatting: normalizeFormatting(clean, normalizeFormatting(text, formatting)
     .map((range) => ({ ...range, start: range.start - start, end: range.end - start }))) };
+}
+
+/** Split around code blocks before linkifying, so code stays literal and copyable. */
+export function messageParts(text: string, formatting?: TextFormat[]) {
+  const blocks = normalizeFormatting(text, formatting).filter((range) => range.style === "codeBlock");
+  const parts: { start: number; text: string; code: boolean }[] = [];
+  let offset = 0;
+  for (const block of blocks) {
+    if (block.start > offset) parts.push({ start: offset, text: text.slice(offset, block.start), code: false });
+    parts.push({ start: block.start, text: text.slice(block.start, block.end), code: true });
+    offset = block.end;
+  }
+  if (offset < text.length) parts.push({ start: offset, text: text.slice(offset), code: false });
+  return parts;
 }
 
 export function sameFormatting(text: string, first?: TextFormat[], second?: TextFormat[]) {

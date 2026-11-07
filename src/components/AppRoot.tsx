@@ -13,6 +13,7 @@ import { setOffline, setOnline } from "../lib/presence";
 import { ensureProfile } from "../lib/profile";
 import { ensureSelfConversation } from "../lib/chat";
 import { stopAudio } from "../lib/audioPlayer";
+import { AgentsView } from "./agents/AgentsView";
 import { AuthView } from "./AuthView";
 import { BottomNav, type View } from "./BottomNav";
 import { ChatView } from "./ChatView";
@@ -209,6 +210,7 @@ export function AppRoot() {
             onConsumeTarget={() => setChatTargetId(null)}
           />
         ) : null}
+        {view === "agents" ? <AgentsView user={user} /> : null}
         {view === "saved" ? <SavedView user={user} /> : null}
         {view === "reminders" ? <RemindersView user={user} /> : null}
         {view === "profile" ? <ProfileView user={user} onLogout={handleLogout} /> : null}

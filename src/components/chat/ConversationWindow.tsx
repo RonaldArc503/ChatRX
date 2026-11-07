@@ -14,6 +14,7 @@ import {
 } from "../../lib/chat";
 import {
   classificationFor,
+  isTextAttachment,
   MAX_ATTACHMENT_BYTES,
   MAX_ATTACHMENTS_PER_MESSAGE,
   uploadToCloudinary,
@@ -24,7 +25,7 @@ import {
   subscribeTyping,
 } from "../../lib/typing";
 import { optimizeVideo } from "../../lib/videoOptimizer";
-import { updatePlaylist } from "../../lib/audioPlayer";
+import { toggleTrack, updatePlaylist } from "../../lib/audioPlayer";
 import { splitLinks } from "./linkify";
 import {
   createSavedItem,
@@ -58,6 +59,8 @@ import { buildMessageThreads, sameMessageDelivery } from "../../lib/chatThreads"
 import { formatDayLabel, formatLastSeen, sameDay } from "./time";
 import { trimFormattedText, type TextFormat } from "../../lib/messageFormatting";
 import { MessageTextEditor, type MessageEditorHandle } from "./MessageTextEditor";
+import { ConversationCollection, ConversationIcon, ConversationSearch, ConversationTabs } from "./ConversationContent";
+import type { ConversationTab } from "../../lib/conversationContent";
 
 interface AttachmentDraft {
   id: string;
@@ -114,6 +117,11 @@ export function ConversationWindow({
     return () => media.removeEventListener("change", update);
   }, []);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [activeTab, setActiveTab] = useState<ConversationTab>("messages");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState<string | null>(null);
+  const searchButtonRef = useRef<HTMLButtonElement>(null);
+  const savedTimeline = useRef({ top: 0, stick: true });
   const [text, setText] = useState("");
   const [formatting, setFormatting] = useState<TextFormat[]>([]);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -181,7 +189,7 @@ function isCoarsePointer(): boolean {
 }
   function scrollToAbsoluteEnd() {
     const el = scrollRef.current;
-    if (!el) return;
+    if (!el || !el.clientHeight) return;
     const max = el.scrollHeight - el.clientHeight;
     el.scrollTop = Math.max(0, max);
   }
@@ -229,15 +237,17 @@ function isCoarsePointer(): boolean {
       )
     : mentionContactsList;
 
-  const imageGallery: LightboxItem[] = messages.flatMap((m) =>
-    (m.attachments ?? [])
-      .filter((a) => a.kind === "image")
-      .map((a) => ({ a, caption: m.text })),
-  );
-
   function openLightbox(m: ChatMessage, a: ChatAttachment) {
+    if (a.kind === "audio") {
+      toggleTrack({ id: a.publicId, url: a.url, name: a.name, msgId: m.id });
+      return;
+    }
+    if ((a.kind === "doc" || a.kind === "file") && !isTextAttachment(a)) {
+      window.open(a.url, "_blank", "noopener,noreferrer");
+      return;
+    }
     if (a.kind === "image") {
-      const idx = imageGallery.findIndex((it) => it.a.publicId === a.publicId);
+      const idx = imageGallery.findIndex((it) => it.a === a);
       setLightbox({ list: imageGallery, index: Math.max(0, idx) });
     } else {
       setLightbox({ list: [{ a, caption: m.text }], index: 0 });
@@ -307,8 +317,15 @@ function isCoarsePointer(): boolean {
   }, [conv.id]);
 
   useEffect(() => {
-    if ((conv.unread?.[me.uid] ?? 0) > 0) markConversationRead(conv.id, me.uid);
-  }, [conv.id, conv.unread?.[me.uid], me.uid]);
+    const markVisibleRead = () => {
+      if (document.visibilityState !== "visible") return;
+      const incoming = messages.filter(message => message.senderId !== me.uid && !message.pending).at(-1);
+      if (incoming) markConversationRead(conv.id, me.uid, incoming);
+    };
+    markVisibleRead();
+    document.addEventListener("visibilitychange", markVisibleRead);
+    return () => document.removeEventListener("visibilitychange", markVisibleRead);
+  }, [conv.id, conv.unread?.[me.uid], me.uid, messages]);
 
   useEffect(() => {
     let active = true;
@@ -375,6 +392,9 @@ function isCoarsePointer(): boolean {
     lastScrollH.current = el.clientHeight;
     const ro = new ResizeObserver(() => {
       const cur = el.clientHeight;
+      // A tab hidden with display:none has no reading viewport. Its temporary
+      // zero height must not shift the saved timeline when Messages returns.
+      if (!cur) { lastScrollH.current = null; return; }
       const prev = lastScrollH.current;
       lastScrollH.current = cur;
       if (stickRef.current) {
@@ -392,7 +412,7 @@ function isCoarsePointer(): boolean {
 
   useEffect(() => {
     const el = scrollRef.current;
-    if (!el || messages.length === 0) return;
+    if (!el || !el.clientHeight || messages.length === 0) return;
     if (entryPending.current) {
       entryPending.current = false;
       requestAnimationFrame(() => {
@@ -417,6 +437,10 @@ function isCoarsePointer(): boolean {
 
   useEffect(() => {
     setEditing(null);
+    setActiveTab("messages");
+    setSearchOpen(false);
+    setPendingNavigation(null);
+    savedTimeline.current = { top: 0, stick: true };
     setThreadRootId(null);
     setInlineEditing(null);
     setThreadBusy(false);
@@ -482,7 +506,7 @@ function isCoarsePointer(): boolean {
 
   function handleScroll() {
     const el = scrollRef.current;
-    if (!el) return;
+    if (!el || !el.clientHeight) return;
     if (isNearBottom(el)) {
       stickRef.current = true;
       setShowJump(false);
@@ -501,6 +525,11 @@ function isCoarsePointer(): boolean {
   function scrollToMessage(msgId: string) {
     const root = threads.rootById.get(msgId);
     if (desktop && root && root !== msgId) {
+      if (threadBusy && root !== threadRootId) {
+        setSendError("Espera a que termine el envío en el hilo actual.");
+        return;
+      }
+      setSearchOpen(false);
       setThreadRootId(root);
       setThreadFocus((value) => value + 1);
       highlightMessage(msgId);
@@ -1017,6 +1046,7 @@ function isCoarsePointer(): boolean {
       return;
     }
     const root = threads.rootById.get(message.id) ?? message.id;
+    setSearchOpen(false);
     if (root !== threadRootId && inlineEditing?.scope === "thread") setInlineEditing(null);
     setThreadRootId(root);
     setThreadFocus((value) => value + 1);
@@ -1114,11 +1144,47 @@ function isCoarsePointer(): boolean {
   const displayMessages = useMemo(() => mergePendingMessages(messages, pendingForConv).filter(
     (m) => !deletedForMeIds.includes(m.id),
   ), [messages, pendingForConv, deletedForMeIds]);
+  const imageGallery: LightboxItem[] = displayMessages.flatMap((message) => (message.attachments ?? [])
+    .filter((attachment) => attachment.kind === "image").map((a) => ({ a, caption: message.text })));
   visibleMessagesRef.current = displayMessages;
   const threads = useMemo(() => buildMessageThreads(displayMessages), [displayMessages]);
   const timeline = desktop ? threads.timeline : displayMessages;
   const threadRoot = desktop ? displayMessages.find((message) => message.id === threadRootId) ?? null : null;
   const threadKey = `${me.uid}:${conv.id}:${threadRoot?.id ?? ""}`;
+
+  function selectTab(tab: ConversationTab) {
+    if (tab === activeTab) return;
+    if (activeTab === "messages") savedTimeline.current = { top: scrollRef.current?.scrollTop ?? 0, stick: stickRef.current };
+    setActiveTab(tab);
+    if (tab === "messages") requestAnimationFrame(() => {
+      stickRef.current = savedTimeline.current.stick;
+      if (scrollRef.current) scrollRef.current.scrollTop = savedTimeline.current.stick ? scrollRef.current.scrollHeight : savedTimeline.current.top;
+    });
+  }
+
+  function jumpToConversationMessage(message: ChatMessage) {
+    setActiveTab("messages");
+    setPendingNavigation(message.id);
+    if (!threadDocked) setSearchOpen(false);
+  }
+
+  function closeSearch() {
+    setSearchOpen(false);
+    requestAnimationFrame(() => searchButtonRef.current?.focus({ preventScroll: true }));
+  }
+
+  function authorName(message: ChatMessage) {
+    return members[message.senderId]?.displayName || (message.senderId === me.uid ? me.displayName : isGroup ? "Miembro" : peer.name);
+  }
+
+  useEffect(() => {
+    if (!pendingNavigation || activeTab !== "messages") return;
+    const frame = requestAnimationFrame(() => {
+      scrollToMessage(pendingNavigation);
+      setPendingNavigation(null);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [pendingNavigation, activeTab]);
 
   useEffect(() => {
     if (threadRootId && !displayMessages.some((message) => message.id === threadRootId)) {
@@ -1186,7 +1252,7 @@ function isCoarsePointer(): boolean {
     <div ref={layoutRef} data-thread-docked={threadDocked ? "true" : "false"} class="chat-conversation-layout relative flex min-h-0 min-w-0 flex-1">
     <div
       class="relative flex min-h-0 min-w-0 flex-1 flex-col"
-      inert={threadRoot && !threadDocked ? true : undefined}
+      inert={(threadRoot || searchOpen) && !threadDocked ? true : undefined}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -1255,6 +1321,12 @@ function isCoarsePointer(): boolean {
             </span>
           )}
         </button>
+        <button ref={searchButtonRef} type="button" aria-label="Buscar en la conversación" title="Buscar en la conversación"
+          aria-expanded={searchOpen} aria-controls="conversation-search-panel" disabled={threadBusy}
+          onClick={() => { if (searchOpen) { closeSearch(); return; } setThreadRootId(null); if (inlineEditing?.scope === "thread") setInlineEditing(null); setSearchOpen(true); }}
+          class="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 aria-expanded:bg-indigo-50 aria-expanded:text-indigo-600 disabled:opacity-40 dark:text-slate-400 dark:hover:bg-slate-800 dark:aria-expanded:bg-indigo-500/15 dark:aria-expanded:text-indigo-300">
+          <ConversationIcon kind="search" className="h-5 w-5" />
+        </button>
         {isGroup ? (
           <button
             type="button"
@@ -1270,6 +1342,8 @@ function isCoarsePointer(): boolean {
           </button>
         ) : null}
       </header>
+
+      <ConversationTabs active={activeTab} onChange={selectTab} />
 
       {dragActive ? (
         <div class="pointer-events-none absolute inset-x-0 top-14 bottom-0 z-10 flex items-center justify-center overflow-hidden">
@@ -1292,7 +1366,7 @@ function isCoarsePointer(): boolean {
         </div>
       ) : null}
 
-      {pinnedList.length > 0 ? (
+      {activeTab === "messages" && pinnedList.length > 0 ? (
         <div class="flex items-center gap-1.5 border-b border-slate-200 bg-indigo-50/70 px-3 py-2 dark:border-slate-800 dark:bg-indigo-500/10">
           <span class="grid h-7 w-7 flex-none place-items-center rounded-lg bg-indigo-100 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-400">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" class="h-4 w-4">
@@ -1364,7 +1438,7 @@ function isCoarsePointer(): boolean {
         </div>
       ) : null}
 
-      <div class="relative min-h-0 flex-1">
+      <div id="conversation-panel-messages" role="tabpanel" aria-labelledby="conversation-tab-messages" class={activeTab === "messages" ? "relative min-h-0 flex-1" : "hidden"}>
         <div
           class="chat-scroll chat-bg h-full overflow-x-hidden overflow-y-auto px-3 py-4 lg:px-0 lg:py-0"
           ref={scrollRef}
@@ -1399,6 +1473,11 @@ function isCoarsePointer(): boolean {
         ) : null}
       </div>
 
+      {activeTab !== "messages" ? <ConversationCollection key={`${conv.id}:${activeTab}`} tab={activeTab} messages={displayMessages} pins={pinnedList}
+        authorName={authorName} onJump={jumpToConversationMessage} onOpenAttachment={openLightbox}
+        onUnpin={(message) => unpinMessage(conv.id, message.id)} /> : null}
+
+      <div class={activeTab === "messages" ? "contents" : "hidden"}>
       {replyMsg ? (
         <div class="flex items-center justify-between gap-2 border-t border-slate-200 bg-indigo-50 px-4 py-2 dark:border-slate-700 dark:bg-indigo-500/15">
           <span class="flex min-w-0 items-center gap-2 text-xs font-semibold text-indigo-700 dark:text-indigo-300">
@@ -1585,11 +1664,11 @@ function isCoarsePointer(): boolean {
         </div>
       ) : null}
 
-      <form class="chat-composer shrink-0 border-t border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900 lg:mx-6 lg:mb-4 lg:mt-3 lg:rounded-xl lg:border lg:shadow-sm lg:focus-within:border-indigo-400 lg:focus-within:ring-2 lg:focus-within:ring-indigo-500/15" onSubmit={(e) => { e.preventDefault(); void handleSubmit(); }}>
+      <form class="chat-composer shrink-0 border-t border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800 lg:mx-6 lg:mb-4 lg:mt-3 lg:rounded-xl lg:border lg:shadow-sm lg:focus-within:border-indigo-400 lg:focus-within:ring-2 lg:focus-within:ring-indigo-500/15" onSubmit={(e) => { e.preventDefault(); void handleSubmit(); }}>
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*,video/*,audio/*,.mp3,.m4a,.aac,.ogg,.opus,.wav,.flac,.pdf,.doc,.docx"
+          accept="image/*,video/*,audio/*,.mp3,.m4a,.aac,.ogg,.opus,.wav,.flac,.pdf,.doc,.docx,.md,.sh"
           multiple
           class="hidden"
           onChange={handleFilesChange}
@@ -1649,7 +1728,10 @@ function isCoarsePointer(): boolean {
           {sendError}
         </p>
       ) : null}
+      </div>
     </div>
+    {searchOpen ? <ConversationSearch key={conv.id} messages={displayMessages} authorName={authorName}
+      onJump={jumpToConversationMessage} onClose={closeSearch} /> : null}
     {threadRoot ? <ThreadPanel key={`${conv.id}:${threadRoot.id}`} root={threadRoot}
       replies={threads.repliesByRoot.get(threadRoot.id) ?? []} me={me} members={members}
       pinnedIds={pinnedList.map((message) => message.id)} focusToken={threadFocus} highlightedId={highlightedId}

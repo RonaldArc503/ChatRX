@@ -47,3 +47,10 @@ test("identical queued text in different threads is not treated as delivered", (
 test("a previous identical reply does not hide a newly queued response", () => {
   assert.equal(sameMessageDelivery(message("old", "a", "user", "Sí"), { ...message("queued", "a", "user", "Sí"), createdAt: 2 }), false);
 });
+
+test("Android threadRootId keeps replies in their original thread", () => {
+  const list = [message("root"), { ...message("native"), threadRootId: "root" }, message("web", "native")];
+  const threads = buildMessageThreads(list);
+  assert.deepEqual(threads.timeline.map(item => item.id), ["root"]);
+  assert.deepEqual(threads.repliesByRoot.get("root").map(item => item.id), ["native", "web"]);
+});

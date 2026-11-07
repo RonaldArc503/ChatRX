@@ -1,84 +1,279 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Cada usuario solo puede leer/escribir su propia subcoleccion de tareas
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function own(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function participant(conversationId) {
+      return signedIn() &&
+        request.auth.uid in
+          get(/databases/$(database)/documents/conversations/$(conversationId))
+            .data.participantIds;
+    }
+
+    // Necesario al crear una conversación y sus índices en la misma transacción.
+    function participantAfter(conversationId) {
+      return signedIn() &&
+        request.auth.uid in
+          getAfter(/databases/$(database)/documents/conversations/$(conversationId))
+            .data.participantIds;
+    }
+
+    function conversationParticipantTarget(conversationId, uid) {
+      return uid in
+        get(/databases/$(database)/documents/conversations/$(conversationId))
+          .data.participantIds;
+    }
+
+    function conversationParticipantTargetAfter(conversationId, uid) {
+      return uid in
+        getAfter(/databases/$(database)/documents/conversations/$(conversationId))
+          .data.participantIds;
+    }
+
+    function onlyReactionChanged() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['reactions']);
+    }
+
+    // Permite el backfill de índices de mensajes antiguos, sin alterar contenido.
+    function onlyMessageSearchIndexChanged() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['searchTerms', 'contentKinds', 'conversationId']);
+    }
+
+    function authorEditsOwnMessage() {
+      return request.auth.uid == resource.data.senderId &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['text', 'formatting', 'edited', 'editedAt', 'searchTerms', 'contentKinds']);
+    }
+
+    // El cliente ajusta el contador del mensaje original en la misma
+    // transacción que crea una respuesta, o al eliminar una respuesta.
+    function onlyReplyCountChanged() {
+      let previousCount = ('replyCount' in resource.data)
+        ? resource.data.replyCount : 0;
+      return request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['replyCount']) &&
+        request.resource.data.replyCount is int &&
+        (request.resource.data.replyCount == previousCount + 1 ||
+          (previousCount > 0 &&
+            request.resource.data.replyCount == previousCount - 1));
+    }
+
+    function validConversationUpdate() {
+      let previous = resource.data;
+      let next = request.resource.data;
+      let group = previous.get('kind', 'dm') == 'group';
+      return next.get('createdAt', 0) == previous.get('createdAt', 0) &&
+        next.get('kind', 'dm') == previous.get('kind', 'dm') &&
+        next.get('directKey', '') == previous.get('directKey', '') &&
+        next.participantIds is list &&
+        (group || (next.participantIds == previous.participantIds &&
+          next.get('members', {}).diff(previous.get('members', {}))
+            .affectedKeys().hasOnly([request.auth.uid]))) &&
+        next.diff(previous).affectedKeys().hasOnly([
+          'unread', 'lastMessage', 'lastMessageAt', 'pinnedMessages',
+          'name', 'members', 'participantIds'
+        ]);
+    }
+
+    // Datos privados: tareas, recordatorios, guardados, etc.
     match /users/{uid}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
+      allow read, write: if own(uid);
     }
 
-    // Perfiles publicos (necesarios para buscar usuarios)
-    match /profiles/{uid} {
-      allow read: if request.auth != null;
-      allow create, update, delete: if request.auth != null && request.auth.uid == uid;
+    function sharedPlaylist(uid, playlistId) {
+      let list = get(/databases/$(database)/documents/users/$(uid)/playlists/$(playlistId)).data;
+      let share = get(/databases/$(database)/documents/sharedMusicPlaylists/$(list.shareId)).data;
+      return signedIn() && share.ownerId == uid && share.playlistId == playlistId;
     }
 
-    // Reserva de telefonos para garantizar unicidad
-    match /phoneIndex/{phone} {
-      allow read, create, delete: if request.auth != null;
+    match /sharedMusicPlaylists/{shareId} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn() &&
+        request.resource.data.keys().hasOnly(['ownerId', 'playlistId']) &&
+        request.resource.data.ownerId == request.auth.uid &&
+        getAfter(/databases/$(database)/documents/users/$(request.auth.uid)/playlists/$(request.resource.data.playlistId)).data.shareId == shareId;
       allow update: if false;
+      allow delete: if signedIn() && resource.data.ownerId == request.auth.uid;
     }
 
-    // Presencia en linea (cada uno escribe solo su propio estado)
-    match /presence/{uid} {
-      allow read: if request.auth != null;
-      allow create, update, delete: if request.auth != null && request.auth.uid == uid;
-    }
-
-    // Indicador "escribiendo..." por conversacion (cada participante toca solo su campo)
-    match /typing/{convId} {
-      allow read: if request.auth != null
-        && request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participantIds;
-      allow create: if request.auth != null
-        && request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participantIds
-        && request.resource.data.keys().hasOnly([request.auth.uid]);
-      allow update: if request.auth != null
-        && request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participantIds
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([request.auth.uid]);
-      allow delete: if false;
-    }
-
-    // Conversaciones 1:1
-    match /conversations/{convId} {
-      allow read: if request.auth != null
-        && (resource == null || request.auth.uid in resource.data.participantIds);
-      allow create: if request.auth != null
-        && request.auth.uid in request.resource.data.participantIds
-        && (
-          !('kind' in request.resource.data)
-          || request.resource.data.kind == "dm"
-          || (
-            request.resource.data.kind == "group"
-            && 'name' in request.resource.data
-            && request.resource.data.name is string
-            && request.resource.data.name.size() > 0
-          )
-        );
-      allow update: if request.auth != null && request.auth.uid in resource.data.participantIds;
-      allow delete: if false;
-
-      match /messages/{msgId} {
-        allow read: if request.auth != null && request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participantIds;
-        allow create: if request.auth != null
-          && request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participantIds
-          && request.resource.data.senderId == request.auth.uid
-          && (!('attachments' in request.resource.data)
-              || (request.resource.data.attachments is list
-                  && request.resource.data.attachments.size() > 0
-                  && request.resource.data.attachments.size() <= 10));
-        allow update: if request.auth != null
-          && request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participantIds
-          && (
-            // El autor puede editar el contenido
-            request.auth.uid == resource.data.senderId
-            // Cualquier participante puede reaccionar sin tocar el contenido
-            || (request.resource.data.text == resource.data.text
-              && request.resource.data.senderId == resource.data.senderId
-              && request.resource.data.createdAt == resource.data.createdAt)
-          );
-        // Cualquier participante de la conversación puede eliminar mensajes (estilo Telegram)
-        allow delete: if request.auth != null
-          && request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participantIds;
+    match /users/{uid}/playlists/{playlistId} {
+      allow get: if sharedPlaylist(uid, playlistId);
+      match /tracks/{trackId} {
+        allow read: if sharedPlaylist(uid, playlistId);
       }
     }
+
+    // El dueño controla sus estados. Un participante solo puede desarchivar
+    // el chat del receptor al enviarle un mensaje, sin tocar pin u otros campos.
+    match /users/{uid}/chatStates/{conversationId} {
+      allow read: if own(uid);
+      allow create: if own(uid) || (
+        participant(conversationId) &&
+        conversationParticipantTarget(conversationId, uid) &&
+        request.resource.data.keys().hasOnly(['archived', 'archivedAt']) &&
+        request.resource.data.archived == false &&
+        request.resource.data.archivedAt == 0
+      );
+      allow update: if own(uid) || (
+        participant(conversationId) &&
+        conversationParticipantTarget(conversationId, uid) &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['archived', 'archivedAt']) &&
+        request.resource.data.archived == false &&
+        request.resource.data.archivedAt == 0
+      );
+      allow delete: if own(uid);
+    }
+
+    match /profiles/{uid} {
+      allow read: if signedIn();
+      allow create, update, delete: if own(uid);
+    }
+
+    // Evita que otro usuario secuestre el número de teléfono de alguien.
+    match /phoneIndex/{phone} {
+      allow read: if signedIn();
+      allow create: if own(request.resource.data.uid);
+      allow update: if own(resource.data.uid) &&
+        request.resource.data.uid == resource.data.uid;
+      allow delete: if own(resource.data.uid);
+    }
+
+    match /presence/{uid} {
+      allow read: if signedIn();
+      allow write: if own(uid);
+    }
+
+    match /conversations/{conversationId} {
+      allow get: if signedIn() && (resource == null ||
+        request.auth.uid in resource.data.participantIds);
+      allow list: if signedIn() && request.auth.uid in resource.data.participantIds;
+
+      allow create: if signedIn() &&
+        request.auth.uid in request.resource.data.participantIds;
+
+      allow update: if participant(conversationId) &&
+        validConversationUpdate();
+
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if participant(conversationId);
+
+        allow create: if participant(conversationId) &&
+          request.resource.data.senderId == request.auth.uid &&
+          request.resource.data.get('conversationId', conversationId) == conversationId &&
+          (!('attachments' in request.resource.data) ||
+            (request.resource.data.attachments is list &&
+              request.resource.data.attachments.size() <= 30));
+
+        // Reacciones de participantes, índices de migración y edición del autor.
+        allow update: if participant(conversationId) && (
+          onlyReactionChanged() ||
+          onlyMessageSearchIndexChanged() ||
+          authorEditsOwnMessage() ||
+          onlyReplyCountChanged()
+        );
+
+        // Decisión de producto: cualquiera en el chat puede eliminar para todos.
+        allow delete: if participant(conversationId);
+      }
+
+      match /receipts/{uid} {
+        allow read: if participant(conversationId);
+        allow create, update, delete: if participant(conversationId) &&
+          request.auth.uid == uid;
+      }
+    }
+
+    // Cada participante solo puede crear, renovar o quitar su propio typing.
+    match /typing/{conversationId} {
+      allow read: if participant(conversationId);
+      allow create: if participant(conversationId) &&
+        request.resource.data.keys().hasOnly([request.auth.uid]);
+      allow update: if participant(conversationId) &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly([request.auth.uid]);
+      allow delete: if false;
+    }
+
+    match /conversationSearch/{indexId} {
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+
+      allow create: if participantAfter(request.resource.data.conversationId) &&
+        conversationParticipantTargetAfter(
+          request.resource.data.conversationId,
+          request.resource.data.userId
+        );
+
+      allow update: if participant(resource.data.conversationId) &&
+        request.resource.data.userId == resource.data.userId &&
+        request.resource.data.conversationId == resource.data.conversationId &&
+        conversationParticipantTarget(
+          resource.data.conversationId,
+          resource.data.userId
+        );
+
+      // Removing an absent index is idempotent and cannot change user data.
+      allow delete: if signedIn() && (resource == null ||
+        participant(resource.data.conversationId));
+    }
+
+    match /globalChatSearch/{indexId} {
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+
+      allow create: if participant(request.resource.data.conversationId) &&
+        conversationParticipantTarget(
+          request.resource.data.conversationId,
+          request.resource.data.userId
+        );
+
+      allow update: if participant(resource.data.conversationId) &&
+        request.resource.data.userId == resource.data.userId &&
+        request.resource.data.conversationId == resource.data.conversationId &&
+        conversationParticipantTarget(
+          resource.data.conversationId,
+          resource.data.userId
+        );
+
+      // Removing an absent index is idempotent and cannot change user data.
+      allow delete: if signedIn() && (resource == null ||
+        participant(resource.data.conversationId));
+    }
+    // El servicio valida identidad y permisos; la web solo observa sus proyectos.
+    function agentProjectOwner(projectId) {
+      return signedIn() && get(/databases/$(database)/documents/agentWorkspaces/$(projectId)).data.ownerUid == request.auth.uid;
+    }
+    match /agentWorkspaces/{projectId} {
+      allow read: if signedIn() && resource.data.ownerUid == request.auth.uid;
+      allow write: if false;
+      match /agents/{agentId} {
+        allow read: if agentProjectOwner(projectId);
+        allow write: if false;
+      }
+      match /messages/{messageId} {
+        allow read: if agentProjectOwner(projectId);
+        allow write: if false;
+      }
+      match /contexts/{key} {
+        allow read: if agentProjectOwner(projectId);
+        allow write: if false;
+        match /revisions/{version} {
+          allow read: if agentProjectOwner(projectId);
+          allow write: if false;
+        }
+      }
+    }
+    match /agentCredentials/{credentialId} { allow read, write: if false; }
+    match /agentRequests/{requestId} { allow read, write: if false; }
   }
 }

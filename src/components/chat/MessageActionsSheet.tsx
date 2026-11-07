@@ -1,6 +1,7 @@
 import type { KeyboardEventHandler } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { ChatMessage } from "../../lib/chat";
+import { copyFormattedMessage } from "../../lib/messageClipboard";
 
 export interface MessageMenuAnchor {
   x: number;
@@ -256,7 +257,7 @@ export function MessageActionsSheet({
       }
     } else {
       try {
-        await navigator.clipboard.writeText(msg!.text);
+        await copyFormattedMessage(msg!.text, msg!.formatting);
       } catch {
         const ta = document.createElement("textarea");
         ta.value = msg!.text;
@@ -264,8 +265,13 @@ export function MessageActionsSheet({
         ta.style.opacity = "0";
         document.body.appendChild(ta);
         ta.select();
-        document.execCommand("copy");
+        const success = document.execCommand("copy");
         document.body.removeChild(ta);
+        if (!success) {
+          setCopyFailed(true);
+          window.setTimeout(() => setCopyFailed(false), 1800);
+          return;
+        }
       }
     }
     setCopied(true);

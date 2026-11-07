@@ -1,5 +1,6 @@
-import { collection, doc, runTransaction, updateDoc, type Firestore } from "firebase/firestore";
+import { collection, doc, runTransaction, updateDoc, writeBatch, type Firestore } from "firebase/firestore";
 import type { ChatAttachment, ForwardedFrom, ReplyInfo } from "./chat";
+import { messageIndexEntries, messageSearchData } from "./chatSearchIndex.ts";
 import { trimFormattedText, type TextFormat } from "./messageFormatting.ts";
 
 /** A rejection belongs to its caller; it must not block the following message. */
@@ -43,6 +44,11 @@ export function sendConversationMessage(db: Firestore, input: MessageToSend): Pr
   return queueFor(db)(input.convId, () => runTransaction(db, async (transaction) => {
     const snapshot = await transaction.get(convRef);
     if (!snapshot.exists()) throw new Error("La conversación ya no existe.");
+    const parentRef = input.replyTo?.id ? doc(convRef, "messages", input.replyTo.id) : null;
+    const parent = parentRef ? await transaction.get(parentRef) : null;
+    const rootId = parent?.exists() ? (parent.data().threadRootId ?? parent!.id) as string : null;
+    const rootRef = rootId ? doc(convRef, "messages", rootId) : null;
+    const root = rootRef && rootId !== parent?.id ? await transaction.get(rootRef) : parent;
     const conversation = snapshot.data() as {
       participantIds: string[];
       unread?: Record<string, number>;
@@ -63,25 +69,58 @@ export function sendConversationMessage(db: Firestore, input: MessageToSend): Pr
       if (id !== input.senderId) patch[`unread.${id}`] = (conversation.unread?.[id] ?? 0) + (mentions.includes(id) ? 2 : 1);
     }
     const message: Record<string, unknown> = { senderId: input.senderId, text: clean, createdAt: now, conversationId: input.convId };
+    Object.assign(message, messageSearchData(clean, input.attachments));
+    if (rootId) message.threadRootId = rootId;
     if (formatting.length) message.formatting = formatting;
     if (input.replyTo) message.replyTo = input.replyTo;
     if (input.attachments?.length) message.attachments = input.attachments;
     if (mentions.length) message.mentions = mentions;
     if (input.forwardedFrom) message.forwardedFrom = input.forwardedFrom;
+    const indexes = await messageIndexEntries(input.convId, msgRef.id, conversation.participantIds,
+      { senderId: input.senderId, createdAt: now, text: clean, attachments: input.attachments });
     transaction.set(msgRef, message);
     transaction.update(convRef, patch);
-  }, { maxAttempts: 10 }));
+    if (rootRef && root?.exists()) transaction.update(rootRef, { replyCount: (root.data().replyCount ?? 0) + 1 });
+    indexes.slice(0, 200).forEach(index => {
+      transaction.set(doc(db, "globalChatSearch", index.id), index.data);
+      if (index.data.userId !== input.senderId) transaction.set(doc(db, "users", index.data.userId, "chatStates", input.convId),
+        { archived: false, archivedAt: 0 }, { merge: true });
+    });
+    return indexes.slice(200);
+  }, { maxAttempts: 10 }).then(async remaining => {
+    for (let offset = 0; offset < remaining.length; offset += 200) {
+      const batch = writeBatch(db);
+      remaining.slice(offset, offset + 200).forEach(index => {
+        batch.set(doc(db, "globalChatSearch", index.id), index.data);
+        if (index.data.userId !== input.senderId) batch.set(doc(db, "users", index.data.userId, "chatStates", input.convId),
+          { archived: false, archivedAt: 0 }, { merge: true });
+      });
+      await batch.commit().catch(error => console.error("No se pudieron actualizar los índices adicionales del grupo", error));
+    }
+  }));
 }
 
-export function markConversationReadOnce(db: Firestore, convId: string, uid: string): Promise<void> {
+export function markConversationReadOnce(db: Firestore, convId: string, uid: string, message?: { id: string; createdAt: number }): Promise<void> {
   let requests = readRequests.get(db);
   if (!requests) { requests = new Map(); readRequests.set(db, requests); }
-  const key = `${convId}:${uid}`;
+  const key = `${convId}:${uid}:${message?.id ?? ""}`;
   const existing = requests.get(key);
   if (existing) return existing;
   // A receipt must not wait behind a long burst and mark later, unseen messages
   // as read after the user has left the conversation.
-  const request = updateDoc(doc(db, "conversations", convId), { [`unread.${uid}`]: 0 });
+  const conversation = doc(db, "conversations", convId);
+  const request = message ? runTransaction(db, async tx => {
+    const receiptRef = doc(conversation, "receipts", uid);
+    const receipt = (await tx.get(receiptRef)).data() ?? {};
+    const chat = (await tx.get(conversation)).data();
+    if (message.createdAt > (receipt.lastReadAt ?? 0)) tx.set(receiptRef, {
+      lastReadAt: message.createdAt, lastReadMessageId: message.id,
+      lastDeliveredAt: Math.max(message.createdAt, receipt.lastDeliveredAt ?? 0),
+      lastDeliveredMessageId: (receipt.lastDeliveredAt ?? 0) > message.createdAt ? receipt.lastDeliveredMessageId : message.id,
+      updatedAt: Date.now(),
+    }, { merge: true });
+    if ((chat?.lastMessageAt ?? 0) <= message.createdAt && (chat?.unread?.[uid] ?? 0) > 0) tx.update(conversation, { [`unread.${uid}`]: 0 });
+  }) : updateDoc(conversation, { [`unread.${uid}`]: 0 });
   requests.set(key, request);
   const cleanup = () => { if (requests.get(key) === request) requests.delete(key); };
   void request.then(cleanup, cleanup);

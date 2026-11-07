@@ -1,7 +1,7 @@
 import type { JSX } from "preact";
 import { Avatar } from "./chat/Avatar";
 
-export type View = "home" | "tasks" | "chat" | "saved" | "reminders" | "profile";
+export type View = "home" | "tasks" | "chat" | "agents" | "saved" | "reminders" | "profile";
 
 interface BottomNavProps {
   view: View;
@@ -48,6 +48,11 @@ const ITEMS: { key: View; label: string; desktopOnly?: boolean; icon: () => JSX.
         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
       </svg>
     ),
+  },
+  {
+    key: "agents",
+    label: "Equipo IA",
+    icon: () => <svg {...ICON_PROPS}><rect x="4" y="7" width="16" height="13" rx="4" /><path d="M12 3v4M8 12h.01M16 12h.01M9 16h6M2 12h2M20 12h2" /></svg>,
   },
   {
     key: "saved",

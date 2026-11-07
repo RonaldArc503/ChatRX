@@ -1,0 +1,12 @@
+{
+  "nodeModulesDir": "auto",
+  "imports": {
+    "express": "npm:express@5.3.0",
+    "zod": "npm:zod@4.6.7",
+    "firebase-admin/app": "npm:firebase-admin@14.5.0/app",
+    "firebase-admin/auth": "npm:firebase-admin@14.5.0/auth",
+    "firebase-admin/firestore": "npm:firebase-admin@14.5.0/firestore",
+    "@modelcontextprotocol/sdk/server/mcp.js": "npm:@modelcontextprotocol/sdk@1.32.2/server/mcp.js",
+    "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js": "npm:@modelcontextprotocol/sdk@1.32.2/server/webStandardStreamableHttp.js"
+  }
+}

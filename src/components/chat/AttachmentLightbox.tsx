@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { ChatAttachment } from "../../lib/chat";
-import { attachmentMediaUrl } from "../../lib/cloudinary";
+import { attachmentMediaUrl, isTextAttachment } from "../../lib/cloudinary";
+import { TextAttachmentPreview, type TextPreviewSource } from "./TextAttachmentPreview";
 
 export interface LightboxItem {
   a: ChatAttachment;
@@ -45,10 +46,13 @@ export function AttachmentLightbox({
   const panRef = useRef({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
   const [dx, setDx] = useState(0);
+  const [textPreview, setTextPreview] = useState<TextPreviewSource | null>(null);
 
   if (!item) return null;
 
   const { a: attachment, caption } = item;
+  const isText = isTextAttachment(attachment);
+  const openUrl = isText ? (textPreview?.source === attachment.url ? textPreview.url : undefined) : attachment.url;
   const isFirst = index <= 0;
   const isLast = index >= mediaList.length - 1;
 
@@ -246,7 +250,9 @@ export function AttachmentLightbox({
             </svg>
           </button>
           <a
-            href={attachment.url}
+            href={openUrl}
+            aria-disabled={!openUrl}
+            onClick={(event) => { if (!openUrl) event.preventDefault(); }}
             target="_blank"
             rel="noopener noreferrer"
             class="grid h-9 w-9 place-items-center rounded-full bg-white/10 transition-colors hover:bg-white/20"
@@ -276,7 +282,7 @@ export function AttachmentLightbox({
         ref={stageRef}
         class="flex min-h-0 flex-1 items-center justify-center overflow-hidden px-4 pb-4"
         style={{
-          touchAction: "none",
+          touchAction: isText ? "auto" : "none",
           transform: `translateX(${dragging && !transformed ? dx : 0}px)`,
           transition: dragging ? "none" : "transform 0.2s ease",
         }}
@@ -288,12 +294,12 @@ export function AttachmentLightbox({
             wasTap.current = false;
           }
         }}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerCancel}
+        onPointerDown={isText ? undefined : handlePointerDown}
+        onPointerMove={isText ? undefined : handlePointerMove}
+        onPointerUp={isText ? undefined : handlePointerUp}
+        onPointerCancel={isText ? undefined : handlePointerCancel}
       >
-        {attachment.kind === "image" ? (
+        {isText ? <TextAttachmentPreview key={attachment.url} url={attachment.url} onReady={setTextPreview} /> : attachment.kind === "image" ? (
           <img
             src={attachmentMediaUrl(attachment.url, "f_auto,q_auto")}
             alt={attachment.name}

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { normalizeFormatting, trimFormattedText, formattedSegments, fromEditorDocument, toEditorDocument } from "./messageFormatting.ts";
 import { splitLinks } from "../components/chat/linkify.ts";
 
-test("accepts only the three styles, bounds offsets, merges each style independently", () => {
+test("accepts only supported styles, bounds offsets, merges each style independently", () => {
   assert.deepEqual(normalizeFormatting("abcdef", [
     { start: -3, end: 2, style: "bold" }, { start: 2, end: 4, style: "bold" },
     { start: 1, end: 99, style: "italic" }, { start: 2, end: 3, style: "underline" },
